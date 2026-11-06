@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="nl">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>GR0ND</title>
+    <link rel="stylesheet" href="/static/stijl.css" />
+  </head>
+  <body>
+    <div class="scene"></div>
+    <div class="korrel"></div>
+    <main class="midden">
+      <form method="post" action="/login">
+        <label class="verborgen" for="email">E-mail</label>
+        <input id="email" type="email" name="email" placeholder="E-mail" autocomplete="username" required autofocus />
+        <label class="verborgen" for="wachtwoord">Wachtwoord</label>
+        <input
+          id="wachtwoord"
+          type="password"
+          name="wachtwoord"
+          placeholder="Wachtwoord"
+          autocomplete="current-password"
+          required
+        />
+        <button type="submit">Inloggen</button>
+      </form>
+    </main>
+  </body>
+</html>

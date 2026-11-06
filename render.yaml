@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: gr0nd
+    runtime: python
+    plan: starter
+    buildCommand: pip install uv && uv sync --frozen --no-dev
+    startCommand: uv run uvicorn gr0nd.app:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.13.0
+      - key: GR0ND_OMGEVING
+        value: productie
+      - key: GR0ND_DATABASE_URL
+        fromDatabase:
+          name: gr0nd-db
+          property: connectionString
+
+databases:
+  - name: gr0nd-db
+    plan: basic-256mb
+    postgresMajorVersion: "17"
