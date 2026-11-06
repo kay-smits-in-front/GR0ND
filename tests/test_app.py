@@ -1,0 +1,108 @@
+from fastapi.testclient import TestClient
+
+from gr0nd.app import Settings, maak_app
+
+
+def test_health_geeft_ok_en_omgeving() -> None:
+    client = TestClient(maak_app(Settings(omgeving="test")))
+
+    antwoord = client.get("/health")
+
+    assert antwoord.status_code == 200
+    assert antwoord.json() == {"status": "ok", "omgeving": "test"}
+
+
+def test_intro_toont_merknaam() -> None:
+    client = TestClient(maak_app(Settings()))
+
+    antwoord = client.get("/")
+
+    assert antwoord.status_code == 200
+    assert "GR0ND" in antwoord.text
+    assert "Empowered by In-front" in antwoord.text
+
+
+def test_login_toont_formulier() -> None:
+    client = TestClient(maak_app(Settings()))
+
+    antwoord = client.get("/login")
+
+    assert antwoord.status_code == 200
+    assert 'name="email"' in antwoord.text
+    assert 'name="wachtwoord"' in antwoord.text
+
+
+DEMO = Settings(omgeving="lokaal", database_url="")
+PRODUCTIE = Settings(omgeving="productie", database_url="")
+TRACE = {"ax": 121000, "ay": 487000, "bx": 121000, "by": 487500}
+
+
+def test_demo_login_gaat_naar_de_kaart() -> None:
+    client = TestClient(maak_app(DEMO))
+
+    antwoord = client.post("/login", data={"email": "x", "wachtwoord": "y"}, follow_redirects=False)
+
+    assert antwoord.status_code == 303
+    assert antwoord.headers["location"] == "/kaart"
+
+
+def test_demo_kaartpagina_is_bereikbaar() -> None:
+    assert TestClient(maak_app(DEMO)).get("/kaart").status_code == 200
+
+
+def test_zonder_database_in_productie_stuurt_kaart_naar_login() -> None:
+    client = TestClient(maak_app(PRODUCTIE))
+
+    antwoord = client.get("/kaart", follow_redirects=False)
+
+    assert antwoord.status_code == 303
+    assert antwoord.headers["location"] == "/login"
+    assert client.get("/api/profiel", params=TRACE).status_code == 401
+
+
+def test_api_nederland_geeft_omtrek_en_zonekaart() -> None:
+    antwoord = TestClient(maak_app(DEMO)).get("/api/nederland")
+
+    assert antwoord.status_code == 200
+    assert antwoord.json()["crs"] == "EPSG:28992"
+
+
+def test_api_profiel_geeft_lagen_bibliotheek_en_checklist() -> None:
+    antwoord = TestClient(maak_app(DEMO)).get("/api/profiel", params=TRACE | {"s": 100})
+    inhoud = antwoord.json()
+
+    assert antwoord.status_code == 200
+    assert len(inhoud["lagen"]) == 8
+    assert inhoud["bibliotheek"]
+    assert inhoud["posities"]
+    assert len(inhoud["checklist"]) == 12
+
+
+def test_api_profiel_weigert_te_kort_trace_en_positie_buiten_trace() -> None:
+    client = TestClient(maak_app(DEMO))
+
+    assert client.get("/api/profiel", params=TRACE | {"by": 487005}).status_code == 400
+    assert client.get("/api/profiel", params=TRACE | {"s": 9999}).status_code == 400
+
+
+def test_api_controle_meldt_te_weinig_dekking() -> None:
+    leiding = {"id": "n", "type_id": "ms240", "u": -8, "diepte": 0.5, "nieuw": True}
+
+    antwoord = TestClient(maak_app(DEMO)).post(
+        "/api/controle", json=TRACE | {"s": 100, "leidingen": [leiding]}
+    )
+    inhoud = antwoord.json()
+
+    assert antwoord.status_code == 200
+    assert any(m["code"] == "dekking" for m in inhoud["meldingen"])
+    assert inhoud["checklist"]["dekking"] == "fout"
+
+
+def test_api_controle_geeft_422_bij_ontbrekende_buis() -> None:
+    leiding = {"id": "k", "type_id": "ms150", "u": 0, "diepte": 1, "buis_id": "weg"}
+
+    antwoord = TestClient(maak_app(DEMO)).post(
+        "/api/controle", json=TRACE | {"s": 100, "leidingen": [leiding]}
+    )
+
+    assert antwoord.status_code == 422

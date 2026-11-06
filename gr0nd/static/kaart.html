@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="nl">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>GR0ND | Kaart</title>
+    <link rel="stylesheet" href="/static/stijl.css" />
+    <link rel="stylesheet" href="/static/kaart.css" />
+    <script src="/static/kaart.js" defer></script>
+  </head>
+  <body class="app">
+    <header class="balk">
+      <span class="merk-klein">GR0ND</span>
+      <nav class="tabs" aria-label="Weergave">
+        <button id="tab-overzicht" type="button" aria-pressed="true">Overzicht</button>
+        <button id="tab-zicht" type="button" aria-pressed="false" disabled>0-zicht</button>
+      </nav>
+      <p id="balk-info" class="balk-info">Voorbeelddata: grond, bovengrond en leidingen zijn nog niet echt.</p>
+    </header>
+
+    <main class="werk">
+      <aside id="paneel-overzicht" class="links">
+        <section class="paneel">
+          <h2>Ga naar</h2>
+          <div id="plaatsen" class="knoppen"></div>
+          <form id="rd-form" class="rij">
+            <label for="rd-invoer">RD-coördinaat (x, y)</label>
+            <input id="rd-invoer" type="text" inputmode="decimal" placeholder="121000, 487000" />
+            <button type="submit">Ga naar punt</button>
+          </form>
+        </section>
+        <section class="paneel">
+          <h2>Tracé</h2>
+          <div class="knoppen">
+            <button id="zet-a" type="button" aria-pressed="false">Zet punt A</button>
+            <button id="zet-b" type="button" aria-pressed="false">Zet punt B</button>
+          </div>
+          <button id="trace-hier" type="button">Maak tracé van 400 m hier</button>
+          <p id="trace-info" class="zacht">Klik een knop en dan op de kaart.</p>
+          <button id="open-zicht" type="button" class="hoofd" disabled>Open 0-zicht</button>
+        </section>
+        <section class="paneel">
+          <h2>Grondzones (voorbeeld)</h2>
+          <ul id="legenda" class="legenda"></ul>
+        </section>
+      </aside>
+
+      <aside id="paneel-zicht" class="links links-zicht" hidden>
+        <section class="paneel tools">
+          <h2>Tools</h2>
+          <div id="tools" class="tools-lijst"></div>
+          <button id="herstel" type="button">Herstel zicht</button>
+        </section>
+        <section class="paneel checklist">
+          <h2>Checklist <span id="checklist-teller" class="zacht"></span></h2>
+          <ul id="checklist"></ul>
+        </section>
+      </aside>
+
+      <section id="vlak" class="werkvlak">
+        <canvas id="kaart" aria-label="Kaart van Nederland"></canvas>
+        <canvas id="zicht" aria-label="0-zicht: doorsnede loodrecht op het tracé" hidden></canvas>
+        <div id="meldingen" class="meldingen" aria-live="polite"></div>
+        <div id="toasts" class="toasts" aria-live="assertive"></div>
+        <p id="status" class="status"></p>
+        <div id="positie" class="positie" hidden>
+          <label for="positie-schuif">Positie langs het tracé</label>
+          <input id="positie-schuif" type="range" min="0" max="100" step="10" value="0" />
+          <output id="positie-waarde"></output>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

@@ -1,0 +1,430 @@
+/* Kaartpagina: balk, linker panelen, werkvlak met kaart of 0-zicht. Gebruikt de variabelen van stijl.css. */
+
+:root {
+  --paneel: #15181b;
+  --rand: rgba(238, 230, 217, 0.14);
+  --fout: #d9534f;
+  --waarschuwing: #e0a43a;
+  --goed: #7fb069;
+  --ruimte: 8px;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+body.app {
+  display: grid;
+  grid-template-rows: 48px 1fr;
+  height: 100vh;
+  height: 100svh;
+  min-height: 0;
+  background: #0e1216;
+}
+
+.balk {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--rand);
+  background: var(--paneel);
+}
+
+.merk-klein {
+  font-weight: 600;
+  letter-spacing: 0.16em;
+}
+
+.tabs {
+  display: flex;
+  gap: 4px;
+}
+
+.balk-info {
+  margin: 0 0 0 auto;
+  font-size: 13px;
+  color: var(--tekst-zacht);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+button,
+input {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--rand);
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+button:hover:not(:disabled) {
+  background: rgba(238, 230, 217, 0.08);
+}
+
+button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+button[aria-pressed="true"],
+button.actief {
+  border-color: var(--lijn);
+  color: var(--lijn);
+  background: rgba(212, 165, 114, 0.1);
+}
+
+button.hoofd {
+  background: var(--lijn);
+  border-color: var(--lijn);
+  color: #1a140d;
+  font-weight: 600;
+}
+
+button.hoofd:hover:not(:disabled) {
+  background: #e0b585;
+}
+
+:focus-visible {
+  outline: 2px solid var(--lijn);
+  outline-offset: 2px;
+}
+
+input[type="text"] {
+  min-height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--rand);
+  border-radius: 6px;
+  background: #0e1216;
+}
+
+.werk {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  min-height: 0;
+}
+
+.links {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 320px;
+  padding: 16px;
+  overflow-y: auto;
+  border-right: 1px solid var(--rand);
+  background: var(--paneel);
+}
+
+.links-zicht {
+  flex-direction: row;
+  width: auto;
+  gap: 0;
+  padding: 0;
+}
+
+.paneel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ruimte);
+}
+
+.paneel h2 {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--tekst-zacht);
+}
+
+.knoppen {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.rij {
+  display: grid;
+  gap: 6px;
+}
+
+.rij label {
+  font-size: 13px;
+  color: var(--tekst-zacht);
+}
+
+.zacht {
+  margin: 0;
+  font-size: 13px;
+  color: var(--tekst-zacht);
+}
+
+.legenda {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+}
+
+.legenda i {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  margin-right: 8px;
+  border-radius: 3px;
+  vertical-align: -1px;
+}
+
+/* 0-zicht: smalle Tools naast een bredere Checklist */
+.tools {
+  width: 148px;
+  padding: 16px 12px;
+  border-right: 1px solid var(--rand);
+}
+
+.checklist {
+  width: 300px;
+  padding: 16px;
+  overflow-y: auto;
+}
+
+.tools-lijst {
+  display: grid;
+  gap: 4px;
+}
+
+.tools-lijst h3 {
+  margin: 8px 0 2px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--tekst-zacht);
+}
+
+.tools-lijst button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-align: left;
+  font-size: 13px;
+  padding: 0 8px;
+}
+
+.tools-lijst i {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 1px solid rgba(238, 230, 217, 0.4);
+}
+
+#checklist {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+}
+
+#checklist li {
+  display: grid;
+  grid-template-columns: 20px 1fr;
+  gap: 8px;
+  align-items: start;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--rand);
+}
+
+#checklist small {
+  display: block;
+  color: var(--tekst-zacht);
+}
+
+.stip {
+  width: 12px;
+  height: 12px;
+  margin-top: 3px;
+  border-radius: 50%;
+  border: 2px solid var(--tekst-zacht);
+}
+
+.stip.ok {
+  background: var(--goed);
+  border-color: var(--goed);
+}
+
+.stip.fout {
+  background: var(--fout);
+  border-color: var(--fout);
+}
+
+/* Werkvlak */
+.werkvlak {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.werkvlak canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+}
+
+#kaart {
+  cursor: grab;
+}
+
+#zicht {
+  cursor: crosshair;
+}
+
+.werkvlak::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  box-shadow: inset 0 0 0 0 rgba(217, 60, 55, 0);
+  transition: box-shadow 250ms ease;
+}
+
+.werkvlak.fout::after {
+  box-shadow: inset 0 0 140px 24px rgba(217, 60, 55, 0.5);
+}
+
+.meldingen {
+  position: absolute;
+  top: 28px;
+  right: 16px;
+  display: grid;
+  gap: 8px;
+  width: min(320px, calc(100% - 32px));
+  pointer-events: none;
+}
+
+.melding {
+  padding: 8px 12px;
+  border: 1px solid var(--rand);
+  border-left: 4px solid var(--tekst-zacht);
+  border-radius: 6px;
+  background: rgba(21, 24, 27, 0.94);
+  font-size: 13px;
+}
+
+.melding.fout {
+  border-left-color: var(--fout);
+}
+
+.melding.waarschuwing {
+  border-left-color: var(--waarschuwing);
+}
+
+.melding.goed {
+  border-left-color: var(--goed);
+}
+
+.toasts {
+  position: absolute;
+  left: 50%;
+  bottom: 72px;
+  display: grid;
+  gap: 8px;
+  transform: translateX(-50%);
+}
+
+.toast {
+  padding: 8px 14px;
+  border-radius: 6px;
+  background: #2a1614;
+  border: 1px solid var(--fout);
+  font-size: 13px;
+}
+
+.status {
+  position: absolute;
+  left: 12px;
+  bottom: 8px;
+  margin: 0;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background: rgba(14, 18, 22, 0.8);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--tekst-zacht);
+  pointer-events: none;
+}
+
+.positie {
+  position: absolute;
+  left: 50%;
+  bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: min(560px, calc(100% - 32px));
+  padding: 8px 12px;
+  transform: translateX(-50%);
+  border: 1px solid var(--rand);
+  border-radius: 6px;
+  background: rgba(21, 24, 27, 0.94);
+  font-size: 13px;
+}
+
+.positie input {
+  flex: 1;
+  accent-color: var(--lijn);
+}
+
+.positie output {
+  min-width: 72px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 900px) {
+  .werk {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto 1fr;
+  }
+
+  .links,
+  .links-zicht {
+    width: auto;
+    max-height: 38vh;
+    border-right: 0;
+    border-bottom: 1px solid var(--rand);
+  }
+
+  .links-zicht {
+    flex-direction: column;
+  }
+
+  .tools,
+  .checklist {
+    width: auto;
+  }
+
+  .balk-info {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .werkvlak::after,
+  button {
+    transition: none;
+  }
+}
