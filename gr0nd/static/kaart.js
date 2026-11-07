@@ -657,6 +657,41 @@ function tekenBovengrond(ctx, g) {
   }
 }
 
+const ADERS = {
+  ader4: { hoek: Math.PI / 4, aantal: 4, afstand: 0.44, straal: 0.34, kleuren: ["#8a5a2b", "#15161a", "#8e9296", "#2f6db5"] },
+  ader3: { hoek: -Math.PI / 2, aantal: 3, afstand: 0.47, straal: 0.38, kleuren: ["#d8d0b8", "#d8d0b8", "#d8d0b8"] },
+};
+
+function cirkel(ctx, x, y, straal, vulling) {
+  ctx.beginPath();
+  ctx.arc(x, y, straal, 0, Math.PI * 2);
+  ctx.fillStyle = vulling;
+  ctx.fill();
+}
+
+function tekenKabelDoorsnede(ctx, x, y, straal, type) {
+  const aders = ADERS[type.opbouw];
+  if (type.mantel) {
+    ctx.beginPath();
+    ctx.arc(x, y, straal * 0.93, 0, Math.PI * 2);
+    ctx.strokeStyle = type.mantel;
+    ctx.lineWidth = Math.max(1.5, straal * 0.07);
+    ctx.stroke();
+  }
+  if (!aders) {
+    cirkel(ctx, x, y, straal * 0.55, type.kern);
+    return;
+  }
+  cirkel(ctx, x, y, straal * 0.84, "#3b3d41");
+  for (let i = 0; i < aders.aantal; i++) {
+    const hoek = aders.hoek + (i * Math.PI * 2) / aders.aantal;
+    const ax = x + Math.cos(hoek) * aders.afstand * straal;
+    const ay = y + Math.sin(hoek) * aders.afstand * straal;
+    cirkel(ctx, ax, ay, aders.straal * straal, aders.kleuren[i]);
+    cirkel(ctx, ax, ay, aders.straal * straal * 0.58, type.kern);
+  }
+}
+
 function tekenLeiding(ctx, leiding) {
   const type = staat.typen[leiding.type_id];
   const [u, d] = positie(leiding);
@@ -686,12 +721,7 @@ function tekenLeiding(ctx, leiding) {
     ctx.lineWidth = 1;
     ctx.stroke();
   }
-  if (type.kern && straal > 6) {
-    ctx.beginPath();
-    ctx.arc(x, y, straal * 0.55, 0, Math.PI * 2);
-    ctx.fillStyle = type.kern;
-    ctx.fill();
-  }
+  if (type.soort === "kabel" && straal > 6) tekenKabelDoorsnede(ctx, x, y, straal, type);
   if (leiding.nieuw || fout || staat.geselecteerd === leiding.id) {
     ctx.beginPath();
     ctx.arc(x, y, Math.max(straal, 3) + 3, 0, Math.PI * 2);
@@ -890,7 +920,7 @@ function bouwTools() {
     kop.textContent = titel;
     doos.append(kop);
     for (const type of Object.values(staat.typen).filter((t) => t.soort === soort && t.plaatsbaar)) {
-      const korteNaam = soort === "kabel" ? `${type.naam.match(/\d+ mm²/)[0]}` : `Ø ${Math.round(type.diameter_m * 1000)} mm`;
+      const korteNaam = soort === "kabel" ? `${type.naam.split("-")[0]} ${type.naam.match(/(\d+×)?\d+ mm²/)[0]}` : `Ø ${Math.round(type.diameter_m * 1000)} mm`;
       const b = knop(type.id, korteNaam, soort === "kabel" ? type.kern : type.kleur);
       b.title = `${type.naam} · Ø ${Math.round(type.diameter_m * 1000)} mm`;
       doos.append(b);

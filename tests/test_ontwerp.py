@@ -1,6 +1,7 @@
 import pytest
 
 from gr0nd.ontwerp import (
+    TYPE_PER_ID,
     Leiding,
     bestaande_leidingen,
     checklist_status,
@@ -124,3 +125,10 @@ def test_checklist_wordt_fout_bij_dekkingsmelding() -> None:
     meldingen, _ = controleer(BOVENGROND, [nieuwe_kabel(-8, 0.5)])
 
     assert checklist_status(meldingen, True) == {"dekking": "fout", "afstand": "ok", "sloot": "ok"}
+
+
+def test_meeraderige_kabels_hebben_een_opbouw_voor_de_doorsnede() -> None:
+    assert TYPE_PER_ID["ls4x150"].opbouw == "ader4"
+    assert TYPE_PER_ID["ms3x150"].opbouw == "ader3"
+    assert TYPE_PER_ID["ms3x150"].mantel is not None
+    assert TYPE_PER_ID["ms240"].opbouw == "massief"

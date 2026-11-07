@@ -31,6 +31,8 @@ class LeidingType:
     kern: str | None  # kleur van de geleider, alleen voor kabels
     plaatsbaar: bool
     bron: str
+    opbouw: str = "massief"  # "massief", "ader3" of "ader4": hoe de doorsnede getekend wordt
+    mantel: str | None = None  # kleur van het randje op de mantel
 
 
 KABEL_KERN = "#b9bec2"
@@ -43,6 +45,10 @@ BIBLIOTHEEK = (
                 "datasheet 6/10 kV eenader, indicatief"),
     LeidingType("ms630", "kabel", "MS-kabel XLPE Al 630 mm²", 0.049, "#1d1d1f", KABEL_KERN, True,
                 "datasheet 6/10 kV eenader, indicatief"),
+    LeidingType("ls4x150", "kabel", "LS-kabel 4×150 mm² Al XLPE", 0.050, "#1d1d1f", KABEL_KERN,
+                True, "datasheet 0,6/1 kV vier aders, indicatief", "ader4"),
+    LeidingType("ms3x150", "kabel", "MS-kabel 3×150 mm² Cu-scherm", 0.085, "#1d1d1f", KABEL_KERN,
+                True, "datasheet 6/10 kV drie aders, indicatief", "ader3", "#b3262b"),
     LeidingType("gplk300", "kabel", "GPLK 3×300 (papier-lood)", 0.040, "#6b6f73", KABEL_KERN,
                 False, "KPN-overzicht, ca. 40 mm"),
     LeidingType("buis110", "buis", "Mantelbuis Ø 110 mm", 0.110, "#7b8591", None, True,
