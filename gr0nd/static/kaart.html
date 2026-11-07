@@ -5,7 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>GR0ND | Kaart</title>
     <link rel="stylesheet" href="/static/stijl.css" />
+    <link rel="stylesheet" href="/static/vendor/maplibre-gl.css" />
     <link rel="stylesheet" href="/static/kaart.css" />
+    <script src="/static/vendor/maplibre-gl.js" defer></script>
     <script src="/static/kaart.js" defer></script>
   </head>
   <body class="app">
@@ -21,13 +23,12 @@
     <main class="werk">
       <aside id="paneel-overzicht" class="links">
         <section class="paneel">
-          <h2>Ga naar</h2>
-          <div id="plaatsen" class="knoppen"></div>
-          <form id="rd-form" class="rij">
-            <label for="rd-invoer">RD-coördinaat (x, y)</label>
-            <input id="rd-invoer" type="text" inputmode="decimal" placeholder="121000, 487000" />
-            <button type="submit">Ga naar punt</button>
-          </form>
+          <h2>Gebied</h2>
+          <div class="knoppen">
+            <button id="teken-gebied" type="button" aria-pressed="false">Teken gebied</button>
+            <button id="wis-gebied" type="button" disabled>Wis gebied</button>
+          </div>
+          <p id="gebied-info" class="zacht">Klik punten op de kaart. Dubbelklik om af te ronden.</p>
         </section>
         <section class="paneel">
           <h2>Tracé</h2>
@@ -35,13 +36,18 @@
             <button id="zet-a" type="button" aria-pressed="false">Zet punt A</button>
             <button id="zet-b" type="button" aria-pressed="false">Zet punt B</button>
           </div>
-          <button id="trace-hier" type="button">Maak tracé van 400 m hier</button>
           <p id="trace-info" class="zacht">Klik een knop en dan op de kaart.</p>
           <button id="open-zicht" type="button" class="hoofd" disabled>Open 0-zicht</button>
         </section>
         <section class="paneel">
-          <h2>Grondzones (voorbeeld)</h2>
-          <ul id="legenda" class="legenda"></ul>
+          <h2>Achtergrond</h2>
+          <div id="achtergronden" class="keuzes"></div>
+        </section>
+        <section class="paneel">
+          <h2>Lagen</h2>
+          <div id="lagen" class="keuzes"></div>
+          <h3 class="zacht-kop">Volgt nog</h3>
+          <ul id="lagen-volgt" class="volgt"></ul>
         </section>
       </aside>
 
@@ -58,7 +64,12 @@
       </aside>
 
       <section id="vlak" class="werkvlak">
-        <canvas id="kaart" aria-label="Kaart van Nederland"></canvas>
+        <div id="kaart" aria-label="Kaart van Nederland"></div>
+        <form id="zoek-form" class="zoek" role="search" autocomplete="off">
+          <label for="zoek-invoer" class="verborgen">Zoek een locatie</label>
+          <input id="zoek-invoer" type="search" placeholder="Zoek adres, plaats of postcode" />
+          <ul id="zoek-lijst" class="zoek-lijst" hidden></ul>
+        </form>
         <canvas id="zicht" aria-label="0-zicht: doorsnede loodrecht op het tracé" hidden></canvas>
         <div id="meldingen" class="meldingen" aria-live="polite"></div>
         <div id="toasts" class="toasts" aria-live="assertive"></div>

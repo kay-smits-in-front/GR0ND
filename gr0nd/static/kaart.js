@@ -5,17 +5,8 @@
 
 const $ = (id) => document.getElementById(id);
 
-const PLAATSEN = [
-  ["Amsterdam", 121000, 487000],
-  ["Rotterdam", 92000, 437000],
-  ["Utrecht", 136000, 456000],
-  ["Eindhoven", 161000, 383000],
-  ["Groningen", 233000, 582000],
-  ["Maastricht", 176000, 318000],
-];
-const NL_BREEDTE_M = 320000;
-const NL_HOOGTE_M = 360000;
 const DIEPTE_M = 50;
+const OVERZICHT_INFO = "Kantelen en draaien: sleep met de rechtermuisknop. Grond en leidingen in het 0-zicht zijn voorbeelddata.";
 const SKY_ONDER = "#1a1f22";
 
 const staat = {
@@ -23,6 +14,8 @@ const staat = {
   nl: null,
   a: null,
   b: null,
+  aLL: null,
+  bLL: null,
   zet: null,
   s: 0,
   profiel: null,
@@ -113,138 +106,172 @@ function aanwijzer(canvas, gebeurtenis) {
   return [gebeurtenis.clientX - vak.left, gebeurtenis.clientY - vak.top];
 }
 
-/* ---------- overzichtskaart ---------- */
+/* ---------- overzichtskaart (MapLibre met PDOK-lagen) ---------- */
 
-const ov = { cx: 146500, cy: 459000, pm: 0.001, w: 1, h: 1, afbeelding: null };
+let kaartObj = null;
+const markers = {};
+const gebied = { punten: [], tekenen: false, klaar: false };
+const leegGeo = () => ({ type: "FeatureCollection", features: [] });
 
-const naarScherm = (x, y) => [ov.w / 2 + (x - ov.cx) * ov.pm, ov.h / 2 - (y - ov.cy) * ov.pm];
-const naarRD = (sx, sy) => [ov.cx + (sx - ov.w / 2) / ov.pm, ov.cy - (sy - ov.h / 2) / ov.pm];
-
-function pasNederlandAan() {
-  ov.cx = 146500;
-  ov.cy = 459000;
-  ov.pm = Math.min(ov.w / NL_BREEDTE_M, ov.h / NL_HOOGTE_M) * 0.96;
-}
-
-function maakZoneAfbeelding(nederland) {
-  const { nx, ny, zones } = nederland.zonekaart;
-  const canvas = document.createElement("canvas");
-  canvas.width = nx;
-  canvas.height = ny;
-  const ctx = canvas.getContext("2d");
-  const beeld = ctx.createImageData(nx, ny);
-  const kleuren = nederland.legenda.map((z) => [1, 3, 5].map((i) => parseInt(z.kleur.slice(i, i + 2), 16)));
-  zones.forEach((zone, index) => {
-    const rij = Math.floor(index / nx);
-    const kolom = index % nx;
-    const doel = ((ny - 1 - rij) * nx + kolom) * 4;
-    beeld.data.set([...kleuren[zone], 255], doel);
+function registreerTegelprotocol() {
+  // PDOK-WMTS verwacht soms een tegelmatrix met voorloopnul ("07"); we proberen beide.
+  maplibregl.addProtocol("pdok", async (params, afbreken) => {
+    const adres = params.url.replace("pdok://", "https://");
+    const matrix = /tilematrix=(\d+)/.exec(adres)[1];
+    for (const waarde of [matrix.padStart(2, "0"), matrix]) {
+      const antwoord = await fetch(adres.replace(/tilematrix=\d+/, `tilematrix=${waarde}`), {
+        signal: afbreken.signal,
+      });
+      if (antwoord.ok && (antwoord.headers.get("content-type") || "").startsWith("image/")) {
+        return { data: await antwoord.arrayBuffer() };
+      }
+    }
+    throw new Error("Tegel niet beschikbaar");
   });
-  ctx.putImageData(beeld, 0, 0);
-  return canvas;
 }
 
-function omtrekPad(ctx) {
-  ctx.beginPath();
-  for (const ring of staat.nl.polygonen) {
-    ring.forEach(([x, y], i) => {
-      const [sx, sy] = naarScherm(x, y);
-      if (i === 0) ctx.moveTo(sx, sy);
-      else ctx.lineTo(sx, sy);
-    });
-    ctx.closePath();
+function maakStijl(lagen) {
+  const bronnen = {};
+  const kaartlagen = lagen.map((laag) => {
+    bronnen[laag.id] = {
+      type: "raster",
+      tiles: [laag.tegels],
+      tileSize: 256,
+      maxzoom: laag.max_zoom,
+      attribution: laag.bron,
+    };
+    return {
+      id: laag.id,
+      type: "raster",
+      source: laag.id,
+      layout: { visibility: laag.standaard ? "visible" : "none" },
+    };
+  });
+  return {
+    version: 8,
+    sources: bronnen,
+    layers: [{ id: "achtergrondkleur", type: "background", paint: { "background-color": "#0e1216" } }, ...kaartlagen],
+  };
+}
+
+function voegTekenlagenToe() {
+  kaartObj.addSource("gebied", { type: "geojson", data: leegGeo() });
+  kaartObj.addSource("trace", { type: "geojson", data: leegGeo() });
+  kaartObj.addLayer({
+    id: "gebied-vlak", type: "fill", source: "gebied", filter: ["==", "$type", "Polygon"],
+    paint: { "fill-color": "#d4a572", "fill-opacity": 0.2 },
+  });
+  kaartObj.addLayer({
+    id: "gebied-lijn", type: "line", source: "gebied", filter: ["!=", "$type", "Point"],
+    paint: { "line-color": "#d4a572", "line-width": 2.5 },
+  });
+  kaartObj.addLayer({
+    id: "gebied-punten", type: "circle", source: "gebied", filter: ["==", "$type", "Point"],
+    paint: { "circle-radius": 4, "circle-color": "#1a140d", "circle-stroke-color": "#d4a572", "circle-stroke-width": 2 },
+  });
+  kaartObj.addLayer({
+    id: "trace-lijn", type: "line", source: "trace",
+    paint: { "line-color": "#ffffff", "line-width": 3, "line-dasharray": [2, 1.5] },
+  });
+}
+
+function oppervlakM2(punten) {
+  const [lon0, lat0] = punten[0];
+  const naarM = ([lon, lat]) => [(lon - lon0) * 111320 * Math.cos((lat0 * Math.PI) / 180), (lat - lat0) * 110540];
+  const xy = punten.map(naarM);
+  let som = 0;
+  xy.forEach(([x, y], i) => {
+    const [x2, y2] = xy[(i + 1) % xy.length];
+    som += x * y2 - x2 * y;
+  });
+  return Math.abs(som) / 2;
+}
+
+function toonOppervlak(m2) {
+  return m2 >= 1e6 ? `${nl(m2 / 1e6)} km²` : m2 >= 1e4 ? `${nl(m2 / 1e4, 1)} ha` : `${nl(m2, 0)} m²`;
+}
+
+function gebiedBijwerken() {
+  const p = gebied.punten;
+  const features = p.map((c) => ({ type: "Feature", properties: {}, geometry: { type: "Point", coordinates: c } }));
+  if (p.length >= 2) {
+    const geometrie = gebied.klaar
+      ? { type: "Polygon", coordinates: [[...p, p[0]]] }
+      : { type: "LineString", coordinates: p };
+    features.push({ type: "Feature", properties: {}, geometry: geometrie });
   }
+  kaartObj.getSource("gebied").setData({ type: "FeatureCollection", features });
+  const info = $("gebied-info");
+  if (gebied.klaar) info.textContent = `Gebied van ${toonOppervlak(oppervlakM2(p))}, ${p.length} hoekpunten.`;
+  else if (gebied.tekenen) info.textContent = `${p.length} punten. Dubbelklik om af te ronden.`;
+  else info.textContent = "Klik punten op de kaart. Dubbelklik om af te ronden.";
+  $("teken-gebied").setAttribute("aria-pressed", gebied.tekenen);
+  $("wis-gebied").disabled = p.length === 0;
+  updateCursor();
 }
 
-function tekenSchaalbalk(ctx) {
-  const opties = [10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000, 50000, 100000];
-  const lengte = opties.filter((m) => m * ov.pm <= 160).pop() ?? opties[0];
-  const breedte = lengte * ov.pm;
-  const x = ov.w - 24 - breedte;
-  const y = ov.h - 28;
-  ctx.strokeStyle = "#eee6d9";
-  ctx.fillStyle = "#eee6d9";
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.moveTo(x, y - 5);
-  ctx.lineTo(x, y);
-  ctx.lineTo(x + breedte, y);
-  ctx.lineTo(x + breedte, y - 5);
-  ctx.stroke();
-  ctx.font = "12px system-ui, sans-serif";
-  ctx.textAlign = "center";
-  ctx.fillText(lengte >= 1000 ? `${lengte / 1000} km` : `${lengte} m`, x + breedte / 2, y - 10);
+function updateCursor() {
+  kaartObj.getCanvas().style.cursor = staat.zet || gebied.tekenen ? "crosshair" : "";
 }
 
-function tekenPunt(ctx, punt, letter) {
-  const [sx, sy] = naarScherm(punt[0], punt[1]);
-  ctx.fillStyle = "#d4a572";
-  ctx.beginPath();
-  ctx.arc(sx, sy, 9, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = "#1a140d";
-  ctx.font = "600 11px system-ui, sans-serif";
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.fillText(letter, sx, sy + 0.5);
-}
-
-function tekenOverzicht() {
-  const { ctx, w, h } = maatCanvas($("kaart"));
-  ov.w = w;
-  ov.h = h;
-  ctx.fillStyle = "#0e1216";
-  ctx.fillRect(0, 0, w, h);
-  if (!staat.nl) return;
-  const zone = staat.nl.zonekaart;
-  ctx.save();
-  omtrekPad(ctx);
-  ctx.clip();
-  const [x0, y0] = naarScherm(zone.x0, zone.y0 + zone.ny * zone.cel);
-  ctx.imageSmoothingEnabled = true;
-  ctx.drawImage(ov.afbeelding, x0, y0, zone.nx * zone.cel * ov.pm, zone.ny * zone.cel * ov.pm);
-  ctx.restore();
-  omtrekPad(ctx);
-  ctx.strokeStyle = "rgba(238, 230, 217, 0.55)";
-  ctx.lineWidth = 1;
-  ctx.stroke();
-  const t = trace();
-  if (t) {
-    const [ax, ay] = naarScherm(t.ax, t.ay);
-    const [bx, by] = naarScherm(t.bx, t.by);
-    ctx.strokeStyle = "#d4a572";
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.moveTo(ax, ay);
-    ctx.lineTo(bx, by);
-    ctx.stroke();
-  }
-  if (staat.a) tekenPunt(ctx, staat.a, "A");
-  if (staat.b) tekenPunt(ctx, staat.b, "B");
-  tekenSchaalbalk(ctx);
-}
-
-function zoomOverzicht(factor, sx, sy) {
-  const [x, y] = naarRD(sx, sy);
-  const minimum = Math.min(ov.w / NL_BREEDTE_M, ov.h / NL_HOOGTE_M) * 0.8;
-  ov.pm = Math.min(3, Math.max(minimum, ov.pm * factor));
-  ov.cx = x - (sx - ov.w / 2) / ov.pm;
-  ov.cy = y + (sy - ov.h / 2) / ov.pm;
-}
-
-function gaNaar(x, y, pm = 0.4) {
-  ov.cx = x;
-  ov.cy = y;
-  ov.pm = pm;
-  tekenOverzicht();
-}
-
-function zetPunt(x, y) {
-  const punt = [Math.round(x), Math.round(y)];
-  if (staat.zet === "A") staat.a = punt;
-  else staat.b = punt;
-  staat.zet = staat.zet === "A" && !staat.b ? "B" : null;
+function startGebied() {
+  gebied.punten = [];
+  gebied.klaar = false;
+  gebied.tekenen = !gebied.tekenen;
+  staat.zet = null;
+  if (gebied.tekenen) kaartObj.doubleClickZoom.disable();
+  else kaartObj.doubleClickZoom.enable();
   traceVeranderd();
+  gebiedBijwerken();
+}
+
+function rondGebiedAf() {
+  if (gebied.punten.length > 2) gebied.punten.pop();
+  gebied.klaar = gebied.punten.length >= 3;
+  gebied.tekenen = false;
+  setTimeout(() => kaartObj.doubleClickZoom.enable(), 300);
+  gebiedBijwerken();
+}
+
+function wisGebied() {
+  gebied.punten = [];
+  gebied.tekenen = false;
+  gebied.klaar = false;
+  kaartObj.doubleClickZoom.enable();
+  gebiedBijwerken();
+}
+
+function maakMarker(letter) {
+  const element = document.createElement("div");
+  element.className = "marker-punt";
+  element.textContent = letter;
+  return new maplibregl.Marker({ element });
+}
+
+function tekenTrace() {
+  for (const [letter, punt] of [["A", staat.aLL], ["B", staat.bLL]]) {
+    markers[letter] ??= maakMarker(letter);
+    if (punt) markers[letter].setLngLat(punt).addTo(kaartObj);
+    else markers[letter].remove();
+  }
+  const lijn = staat.aLL && staat.bLL
+    ? [{ type: "Feature", properties: {}, geometry: { type: "LineString", coordinates: [staat.aLL, staat.bLL] } }]
+    : [];
+  kaartObj.getSource("trace").setData({ type: "FeatureCollection", features: lijn });
+}
+
+async function zetPunt(lngLat) {
+  const letter = staat.zet;
+  try {
+    const rd = await api(`/api/rd?lon=${lngLat.lng}&lat=${lngLat.lat}`);
+    const [punt, ll] = [[rd.x, rd.y], [lngLat.lng, lngLat.lat]];
+    if (letter === "A") [staat.a, staat.aLL] = [punt, ll];
+    else [staat.b, staat.bLL] = [punt, ll];
+    staat.zet = letter === "A" && !staat.b ? "B" : null;
+    traceVeranderd();
+  } catch (fout) {
+    toon(fout.message);
+  }
 }
 
 function traceVeranderd() {
@@ -254,90 +281,152 @@ function traceVeranderd() {
   const info = $("trace-info");
   if (t) {
     const lengte = traceLengte();
-    const azimut = ((Math.atan2(t.bx - t.ax, t.by - t.ay) * 180) / Math.PI + 360) % 360;
-    info.textContent = `Lengte ${lengte >= 1000 ? nl(lengte / 1000) + " km" : nl(lengte, 0) + " m"} · richting ${nl(azimut, 0)}° (0 = noord)`;
+    info.textContent = `Rechte lijn van ${lengte >= 1000 ? nl(lengte / 1000) + " km" : nl(lengte, 0) + " m"}. Een tracé met bochten volgt.`;
   } else {
     info.textContent = staat.a ? "Zet nu punt B." : "Klik een knop en dan op de kaart.";
   }
   $("open-zicht").disabled = !t;
   $("tab-zicht").disabled = !t;
   for (const [id, letter] of [["zet-a", "A"], ["zet-b", "B"]]) $(id).setAttribute("aria-pressed", staat.zet === letter);
-  $("kaart").style.cursor = staat.zet ? "crosshair" : "grab";
-  tekenOverzicht();
+  if (kaartObj?.getSource("trace")) {
+    tekenTrace();
+    updateCursor();
+  }
+}
+
+function bouwLagenpaneel(catalogus) {
+  const maak = (laag, soort) => {
+    const label = document.createElement("label");
+    const keuze = document.createElement("input");
+    keuze.type = soort;
+    keuze.name = soort === "radio" ? "achtergrond" : laag.id;
+    keuze.checked = laag.standaard;
+    keuze.addEventListener("change", () => {
+      if (soort === "radio") {
+        for (const andere of catalogus.lagen.filter((l) => l.groep === "achtergrond")) {
+          kaartObj.setLayoutProperty(andere.id, "visibility", andere.id === laag.id ? "visible" : "none");
+        }
+      } else {
+        kaartObj.setLayoutProperty(laag.id, "visibility", keuze.checked ? "visible" : "none");
+      }
+    });
+    label.append(keuze, laag.naam);
+    return label;
+  };
+  for (const laag of catalogus.lagen) {
+    $(laag.groep === "achtergrond" ? "achtergronden" : "lagen").append(maak(laag, laag.groep === "achtergrond" ? "radio" : "checkbox"));
+  }
+  for (const item of catalogus.volgt) {
+    const li = document.createElement("li");
+    li.textContent = item.naam;
+    li.title = item.reden;
+    $("lagen-volgt").append(li);
+  }
+}
+
+function bindZoeken() {
+  const invoer = $("zoek-invoer");
+  const lijst = $("zoek-lijst");
+  let timer = null;
+  let nummer = 0;
+  const sluit = () => {
+    lijst.hidden = true;
+    lijst.replaceChildren();
+  };
+  const kies = async (resultaat) => {
+    sluit();
+    try {
+      const plek = await api(`/api/zoek/locatie?id=${encodeURIComponent(resultaat.id)}`);
+      invoer.value = plek.naam;
+      kaartObj.flyTo({
+        center: [plek.lon, plek.lat], zoom: plek.zoom, pitch: plek.zoom >= 15 ? 50 : kaartObj.getPitch(), duration: 2500,
+      });
+    } catch (fout) {
+      toon(fout.message);
+    }
+  };
+  invoer.addEventListener("input", () => {
+    clearTimeout(timer);
+    timer = setTimeout(async () => {
+      const volgnummer = ++nummer;
+      const tekst = invoer.value.trim();
+      if (tekst.length < 2) return sluit();
+      try {
+        const resultaten = await api(`/api/zoek?q=${encodeURIComponent(tekst)}`);
+        if (volgnummer !== nummer) return;
+        lijst.replaceChildren();
+        for (const r of resultaten) {
+          const li = document.createElement("li");
+          const knop = document.createElement("button");
+          knop.type = "button";
+          knop.textContent = r.naam;
+          knop.addEventListener("click", () => kies(r));
+          li.append(knop);
+          lijst.append(li);
+        }
+        lijst.hidden = resultaten.length === 0;
+      } catch (fout) {
+        toon(fout.message);
+      }
+    }, 250);
+  });
+  $("zoek-form").addEventListener("submit", (e) => {
+    e.preventDefault();
+    lijst.querySelector("button")?.click();
+  });
+  invoer.addEventListener("keydown", (e) => e.key === "Escape" && sluit());
+  document.addEventListener("click", (e) => !$("zoek-form").contains(e.target) && sluit());
 }
 
 function bindOverzicht() {
-  const canvas = $("kaart");
-  let sleep = null;
-  canvas.addEventListener("pointerdown", (e) => {
-    canvas.setPointerCapture(e.pointerId);
-    const [sx, sy] = aanwijzer(canvas, e);
-    sleep = { sx, sy, bewogen: false };
-  });
-  canvas.addEventListener("pointermove", (e) => {
-    const [sx, sy] = aanwijzer(canvas, e);
-    const [x, y] = naarRD(sx, sy);
-    $("status").textContent = `RD ${nl(x, 0)}, ${nl(y, 0)}`;
-    if (!sleep) return;
-    if (Math.hypot(sx - sleep.sx, sy - sleep.sy) > 4) sleep.bewogen = true;
-    if (!sleep.bewogen) return;
-    ov.cx -= (sx - sleep.sx) / ov.pm;
-    ov.cy += (sy - sleep.sy) / ov.pm;
-    sleep.sx = sx;
-    sleep.sy = sy;
-    tekenOverzicht();
-  });
-  canvas.addEventListener("pointerup", (e) => {
-    const [sx, sy] = aanwijzer(canvas, e);
-    if (sleep && !sleep.bewogen && staat.zet) zetPunt(...naarRD(sx, sy));
-    sleep = null;
-  });
-  canvas.addEventListener("wheel", (e) => {
-    e.preventDefault();
-    const [sx, sy] = aanwijzer(canvas, e);
-    zoomOverzicht(Math.exp(-e.deltaY * 0.0015), sx, sy);
-    tekenOverzicht();
-  }, { passive: false });
-  canvas.addEventListener("dblclick", (e) => {
-    zoomOverzicht(2, ...aanwijzer(canvas, e));
-    tekenOverzicht();
-  });
-
-  for (const [naam, x, y] of PLAATSEN) {
-    const knop = document.createElement("button");
-    knop.type = "button";
-    knop.textContent = naam;
-    knop.addEventListener("click", () => gaNaar(x, y));
-    $("plaatsen").append(knop);
-  }
-  const heel = document.createElement("button");
-  heel.type = "button";
-  heel.textContent = "Heel Nederland";
-  heel.addEventListener("click", () => {
-    pasNederlandAan();
-    tekenOverzicht();
-  });
-  $("plaatsen").append(heel);
-
-  $("rd-form").addEventListener("submit", (e) => {
-    e.preventDefault();
-    const delen = $("rd-invoer").value.split(/[\s,;]+/).filter(Boolean).map((d) => Number(d.replace(",", ".")));
-    if (delen.length !== 2 || delen.some(Number.isNaN)) return toon("Vul twee getallen in, bijvoorbeeld 121000, 487000.");
-    gaNaar(delen[0], delen[1]);
-  });
   for (const [id, letter] of [["zet-a", "A"], ["zet-b", "B"]]) {
     $(id).addEventListener("click", () => {
       staat.zet = staat.zet === letter ? null : letter;
+      if (gebied.tekenen) startGebied();
       traceVeranderd();
     });
   }
-  $("trace-hier").addEventListener("click", () => {
-    staat.a = [Math.round(ov.cx), Math.round(ov.cy)];
-    staat.b = [Math.round(ov.cx), Math.round(ov.cy) + 400];
-    staat.zet = null;
-    traceVeranderd();
-  });
+  $("teken-gebied").addEventListener("click", startGebied);
+  $("wis-gebied").addEventListener("click", wisGebied);
   $("open-zicht").addEventListener("click", openZicht);
+  bindZoeken();
+}
+
+function bindKaart() {
+  kaartObj.on("click", (e) => {
+    if (staat.zet) zetPunt(e.lngLat);
+    else if (gebied.tekenen) {
+      gebied.punten.push([e.lngLat.lng, e.lngLat.lat]);
+      gebiedBijwerken();
+    }
+  });
+  kaartObj.on("dblclick", () => gebied.tekenen && rondGebiedAf());
+  kaartObj.on("mousemove", (e) => {
+    $("status").textContent = `${nl(e.lngLat.lat, 5)} N, ${nl(e.lngLat.lng, 5)} O · kantel ${nl(kaartObj.getPitch(), 0)}°`;
+  });
+}
+
+async function startKaart() {
+  registreerTegelprotocol();
+  const catalogus = await api("/api/lagen");
+  kaartObj = new maplibregl.Map({
+    container: "kaart",
+    style: maakStijl(catalogus.lagen),
+    center: [5.29, 52.13],
+    zoom: 7,
+    minZoom: 6,
+    maxZoom: 20,
+    maxPitch: 80,
+    renderWorldCopies: false,
+    maxBounds: [[2.0, 50.3], [8.4, 54.0]],
+    attributionControl: { compact: true },
+  });
+  kaartObj.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), "top-right");
+  kaartObj.addControl(new maplibregl.ScaleControl({ unit: "metric" }), "bottom-right");
+  bouwLagenpaneel(catalogus);
+  await new Promise((klaar) => kaartObj.on("load", klaar));
+  voegTekenlagenToe();
+  bindKaart();
 }
 
 /* ---------- 0-zicht ---------- */
@@ -947,6 +1036,7 @@ function zetWeergave(naam) {
   staat.weergave = naam;
   const zichtActief = naam === "zicht";
   $("kaart").hidden = zichtActief;
+  $("zoek-form").hidden = zichtActief;
   $("zicht").hidden = !zichtActief;
   $("paneel-overzicht").hidden = zichtActief;
   $("paneel-zicht").hidden = !zichtActief;
@@ -957,8 +1047,8 @@ function zetWeergave(naam) {
   $("meldingen").replaceChildren();
   $("vlak").classList.remove("fout");
   if (!zichtActief) {
-    $("balk-info").textContent = "Voorbeelddata: grond, bovengrond en leidingen zijn nog niet echt.";
-    tekenOverzicht();
+    $("balk-info").textContent = OVERZICHT_INFO;
+    kaartObj?.resize();
   }
 }
 
@@ -968,24 +1058,13 @@ async function start() {
   bindZicht();
   $("tab-overzicht").addEventListener("click", () => zetWeergave("overzicht"));
   $("tab-zicht").addEventListener("click", openZicht);
-  new ResizeObserver(() => (staat.weergave === "zicht" ? tekenZicht() : tekenOverzicht())).observe($("vlak"));
-  tekenOverzicht();
-  pasNederlandAan();
+  new ResizeObserver(() => (staat.weergave === "zicht" ? tekenZicht() : kaartObj?.resize())).observe($("vlak"));
+  $("balk-info").textContent = OVERZICHT_INFO;
   try {
-    staat.nl = await api("/api/nederland");
+    await startKaart();
   } catch (fout) {
-    return toon(fout.message);
+    toon(fout.message);
   }
-  ov.afbeelding = maakZoneAfbeelding(staat.nl);
-  $("legenda").innerHTML = "";
-  for (const z of staat.nl.legenda) {
-    const item = document.createElement("li");
-    const vlak = document.createElement("i");
-    vlak.style.background = z.kleur;
-    item.append(vlak, z.naam);
-    $("legenda").append(item);
-  }
-  tekenOverzicht();
 }
 
 start();
