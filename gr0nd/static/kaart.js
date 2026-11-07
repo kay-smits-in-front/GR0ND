@@ -12,11 +12,7 @@ const SKY_ONDER = "#1a1f22";
 const staat = {
   weergave: "overzicht",
   nl: null,
-  a: null,
-  b: null,
-  aLL: null,
-  bLL: null,
-  zet: null,
+  trace: { ll: [], rd: [], tekenen: false },
   s: 0,
   profiel: null,
   typen: {},
@@ -78,13 +74,13 @@ async function api(pad, opties) {
 }
 
 function trace() {
-  if (!staat.a || !staat.b) return null;
-  return { ax: staat.a[0], ay: staat.a[1], bx: staat.b[0], by: staat.b[1] };
+  const t = staat.trace;
+  return !t.tekenen && t.rd.length >= 2 ? { punten: t.rd } : null;
 }
 
 function traceLengte() {
-  const t = trace();
-  return t ? Math.hypot(t.bx - t.ax, t.by - t.ay) : 0;
+  const rd = staat.trace.rd;
+  return rd.slice(1).reduce((som, p, i) => som + Math.hypot(p[0] - rd[i][0], p[1] - rd[i][1]), 0);
 }
 
 function maatCanvas(canvas) {
@@ -170,8 +166,12 @@ function voegTekenlagenToe() {
     paint: { "circle-radius": 4, "circle-color": "#1a140d", "circle-stroke-color": "#d4a572", "circle-stroke-width": 2 },
   });
   kaartObj.addLayer({
-    id: "trace-lijn", type: "line", source: "trace",
+    id: "trace-lijn", type: "line", source: "trace", filter: ["!=", "$type", "Point"],
     paint: { "line-color": "#ffffff", "line-width": 3, "line-dasharray": [2, 1.5] },
+  });
+  kaartObj.addLayer({
+    id: "trace-punten", type: "circle", source: "trace", filter: ["==", "$type", "Point"],
+    paint: { "circle-radius": 5, "circle-color": "#ffffff", "circle-stroke-color": "#1a140d", "circle-stroke-width": 2 },
   });
 }
 
@@ -211,14 +211,14 @@ function gebiedBijwerken() {
 }
 
 function updateCursor() {
-  kaartObj.getCanvas().style.cursor = staat.zet || gebied.tekenen ? "crosshair" : "";
+  kaartObj.getCanvas().style.cursor = staat.trace.tekenen || gebied.tekenen ? "crosshair" : "";
 }
 
 function startGebied() {
   gebied.punten = [];
   gebied.klaar = false;
   gebied.tekenen = !gebied.tekenen;
-  staat.zet = null;
+  if (gebied.tekenen && staat.trace.tekenen) wisTrace();
   if (gebied.tekenen) kaartObj.doubleClickZoom.disable();
   else kaartObj.doubleClickZoom.enable();
   traceVeranderd();
@@ -249,45 +249,85 @@ function maakMarker(letter) {
 }
 
 function tekenTrace() {
-  for (const [letter, punt] of [["A", staat.aLL], ["B", staat.bLL]]) {
+  const ll = staat.trace.ll;
+  const eind = ll.length > 1 ? ll.at(-1) : null;
+  for (const [letter, punt] of [["A", ll[0]], ["B", eind]]) {
     markers[letter] ??= maakMarker(letter);
     if (punt) markers[letter].setLngLat(punt).addTo(kaartObj);
     else markers[letter].remove();
   }
-  const lijn = staat.aLL && staat.bLL
-    ? [{ type: "Feature", properties: {}, geometry: { type: "LineString", coordinates: [staat.aLL, staat.bLL] } }]
-    : [];
-  kaartObj.getSource("trace").setData({ type: "FeatureCollection", features: lijn });
+  const features = ll.slice(1, -1).map((c) => ({ type: "Feature", properties: {}, geometry: { type: "Point", coordinates: c } }));
+  if (ll.length >= 2) features.push({ type: "Feature", properties: {}, geometry: { type: "LineString", coordinates: ll } });
+  kaartObj.getSource("trace").setData({ type: "FeatureCollection", features });
 }
 
-async function zetPunt(lngLat) {
-  const letter = staat.zet;
+function voegTracepunt(lngLat) {
+  staat.trace.ll.push([lngLat.lng, lngLat.lat]);
+  staat.trace.rd = [];
+  traceVeranderd();
+}
+
+async function rondTraceAf() {
+  const t = staat.trace;
+  if (t.ll.length < 2) return toon("Zet minstens twee punten voor een tracé.");
   try {
-    const rd = await api(`/api/rd?lon=${lngLat.lng}&lat=${lngLat.lat}`);
-    const [punt, ll] = [[rd.x, rd.y], [lngLat.lng, lngLat.lat]];
-    if (letter === "A") [staat.a, staat.aLL] = [punt, ll];
-    else [staat.b, staat.bLL] = [punt, ll];
-    staat.zet = letter === "A" && !staat.b ? "B" : null;
-    traceVeranderd();
+    const paren = t.ll.map(([lon, lat]) => `${lon},${lat}`).join(";");
+    t.rd = (await api(`/api/rd?punten=${encodeURIComponent(paren)}`)).punten;
+    t.tekenen = false;
   } catch (fout) {
-    toon(fout.message);
+    return toon(fout.message);
   }
+  traceVeranderd();
+}
+
+function startTrace() {
+  const t = staat.trace;
+  t.tekenen = !t.tekenen;
+  if (t.tekenen) {
+    t.rd = [];
+    if (gebied.tekenen) startGebied();
+    kaartObj.doubleClickZoom.disable();
+  } else {
+    kaartObj.doubleClickZoom.enable();
+  }
+  traceVeranderd();
+}
+
+function laatstePuntWeg() {
+  const t = staat.trace;
+  t.ll.pop();
+  t.rd = [];
+  t.tekenen = true;
+  kaartObj.doubleClickZoom.disable();
+  traceVeranderd();
+}
+
+function wisTrace() {
+  staat.trace = { ll: [], rd: [], tekenen: false };
+  kaartObj?.doubleClickZoom.enable();
+  traceVeranderd();
 }
 
 function traceVeranderd() {
   staat.nieuwe = [];
   staat.profiel = null;
-  const t = trace();
-  const info = $("trace-info");
-  if (t) {
-    const lengte = traceLengte();
-    info.textContent = `Rechte lijn van ${lengte >= 1000 ? nl(lengte / 1000) + " km" : nl(lengte, 0) + " m"}. Een tracé met bochten volgt.`;
+  const t = staat.trace;
+  const klaar = Boolean(trace());
+  const lengte = traceLengte();
+  if (klaar) {
+    const tekst = lengte >= 1000 ? `${nl(lengte / 1000)} km` : `${nl(lengte, 0)} m`;
+    $("trace-info").textContent = `Tracé van ${tekst} met ${t.rd.length - 2} bochten.`;
+  } else if (t.tekenen) {
+    $("trace-info").textContent = `${t.ll.length} punten. Klik verder, dubbelklik of kies Klaar.`;
   } else {
-    info.textContent = staat.a ? "Zet nu punt B." : "Klik een knop en dan op de kaart.";
+    $("trace-info").textContent = "Kies Teken tracé en klik de route op de kaart, ook met bochten.";
   }
-  $("open-zicht").disabled = !t;
-  $("tab-zicht").disabled = !t;
-  for (const [id, letter] of [["zet-a", "A"], ["zet-b", "B"]]) $(id).setAttribute("aria-pressed", staat.zet === letter);
+  $("open-zicht").disabled = !klaar;
+  $("tab-zicht").disabled = !klaar;
+  $("teken-trace").setAttribute("aria-pressed", t.tekenen);
+  $("klaar-trace").disabled = !(t.tekenen && t.ll.length >= 2);
+  $("laatste-punt").disabled = t.ll.length === 0;
+  $("wis-trace").disabled = t.ll.length === 0;
   if (kaartObj?.getSource("trace")) {
     tekenTrace();
     updateCursor();
@@ -379,13 +419,10 @@ function bindZoeken() {
 }
 
 function bindOverzicht() {
-  for (const [id, letter] of [["zet-a", "A"], ["zet-b", "B"]]) {
-    $(id).addEventListener("click", () => {
-      staat.zet = staat.zet === letter ? null : letter;
-      if (gebied.tekenen) startGebied();
-      traceVeranderd();
-    });
-  }
+  $("teken-trace").addEventListener("click", startTrace);
+  $("klaar-trace").addEventListener("click", rondTraceAf);
+  $("laatste-punt").addEventListener("click", laatstePuntWeg);
+  $("wis-trace").addEventListener("click", wisTrace);
   $("teken-gebied").addEventListener("click", startGebied);
   $("wis-gebied").addEventListener("click", wisGebied);
   $("open-zicht").addEventListener("click", openZicht);
@@ -394,13 +431,18 @@ function bindOverzicht() {
 
 function bindKaart() {
   kaartObj.on("click", (e) => {
-    if (staat.zet) zetPunt(e.lngLat);
+    if (staat.trace.tekenen) voegTracepunt(e.lngLat);
     else if (gebied.tekenen) {
       gebied.punten.push([e.lngLat.lng, e.lngLat.lat]);
       gebiedBijwerken();
     }
   });
-  kaartObj.on("dblclick", () => gebied.tekenen && rondGebiedAf());
+  kaartObj.on("dblclick", () => {
+    if (staat.trace.tekenen) {
+      staat.trace.ll.pop();
+      rondTraceAf();
+    } else if (gebied.tekenen) rondGebiedAf();
+  });
   kaartObj.on("mousemove", (e) => {
     $("status").textContent = `${nl(e.lngLat.lat, 5)} N, ${nl(e.lngLat.lng, 5)} O · kantel ${nl(kaartObj.getPitch(), 0)}°`;
   });
@@ -739,7 +781,7 @@ function tekenZicht() {
 
 async function laadProfiel(s) {
   const t = trace();
-  const vraag = new URLSearchParams({ ...t, s });
+  const vraag = new URLSearchParams({ punten: t.punten.map((p) => p.join(",")).join(";"), s });
   const profiel = await api(`/api/profiel?${vraag}`);
   staat.s = s;
   staat.profiel = profiel;
@@ -1016,10 +1058,11 @@ async function openZicht() {
   if (!trace()) return;
   try {
     const lengte = traceLengte();
-    await laadProfiel(Math.round(lengte / 2 / 10) * 10);
+    await laadProfiel(0);
     const schuif = $("positie-schuif");
     schuif.max = Math.floor(lengte);
     schuif.value = staat.s;
+    $("knikken").replaceChildren(...staat.profiel.trace.knikken.map((afstand) => Object.assign(document.createElement("option"), { value: afstand })));
     $("positie-waarde").textContent = `${staat.s} m`;
   } catch (fout) {
     toon(fout.message);

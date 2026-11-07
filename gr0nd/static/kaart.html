@@ -33,10 +33,12 @@
         <section class="paneel">
           <h2>Tracé</h2>
           <div class="knoppen">
-            <button id="zet-a" type="button" aria-pressed="false">Zet punt A</button>
-            <button id="zet-b" type="button" aria-pressed="false">Zet punt B</button>
+            <button id="teken-trace" type="button" aria-pressed="false">Teken tracé</button>
+            <button id="klaar-trace" type="button" disabled>Klaar</button>
+            <button id="laatste-punt" type="button" disabled>Laatste punt weg</button>
+            <button id="wis-trace" type="button" disabled>Wis tracé</button>
           </div>
-          <p id="trace-info" class="zacht">Klik een knop en dan op de kaart.</p>
+          <p id="trace-info" class="zacht">Kies Teken tracé en klik de route op de kaart, ook met bochten.</p>
           <button id="open-zicht" type="button" class="hoofd" disabled>Open 0-zicht</button>
         </section>
         <section class="paneel">
@@ -76,7 +78,8 @@
         <p id="status" class="status"></p>
         <div id="positie" class="positie" hidden>
           <label for="positie-schuif">Positie langs het tracé</label>
-          <input id="positie-schuif" type="range" min="0" max="100" step="10" value="0" />
+          <input id="positie-schuif" type="range" min="0" max="100" step="1" value="0" list="knikken" />
+          <datalist id="knikken"></datalist>
           <output id="positie-waarde"></output>
         </div>
       </section>

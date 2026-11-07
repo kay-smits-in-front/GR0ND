@@ -35,7 +35,9 @@ def test_login_toont_formulier() -> None:
 
 DEMO = Settings(omgeving="lokaal", database_url="")
 PRODUCTIE = Settings(omgeving="productie", database_url="")
-TRACE = {"ax": 121000, "ay": 487000, "bx": 121000, "by": 487500}
+TRACE_PUNTEN = "121000,487000;121000,487500"
+TRACE = {"punten": [[121000, 487000], [121000, 487500]]}
+VRAAG = {"punten": TRACE_PUNTEN}
 
 
 def test_demo_login_gaat_naar_de_kaart() -> None:
@@ -58,7 +60,7 @@ def test_zonder_database_in_productie_stuurt_kaart_naar_login() -> None:
 
     assert antwoord.status_code == 303
     assert antwoord.headers["location"] == "/login"
-    assert client.get("/api/profiel", params=TRACE).status_code == 401
+    assert client.get("/api/profiel", params=VRAAG).status_code == 401
 
 
 def test_api_nederland_geeft_omtrek_en_zonekaart() -> None:
@@ -69,7 +71,7 @@ def test_api_nederland_geeft_omtrek_en_zonekaart() -> None:
 
 
 def test_api_profiel_geeft_lagen_bibliotheek_en_checklist() -> None:
-    antwoord = TestClient(maak_app(DEMO)).get("/api/profiel", params=TRACE | {"s": 100})
+    antwoord = TestClient(maak_app(DEMO)).get("/api/profiel", params=VRAAG | {"s": 100})
     inhoud = antwoord.json()
 
     assert antwoord.status_code == 200
@@ -82,8 +84,11 @@ def test_api_profiel_geeft_lagen_bibliotheek_en_checklist() -> None:
 def test_api_profiel_weigert_te_kort_trace_en_positie_buiten_trace() -> None:
     client = TestClient(maak_app(DEMO))
 
-    assert client.get("/api/profiel", params=TRACE | {"by": 487005}).status_code == 400
-    assert client.get("/api/profiel", params=TRACE | {"s": 9999}).status_code == 400
+    assert (
+        client.get("/api/profiel", params={"punten": "121000,487000;121000,487005"}).status_code
+        == 400
+    )
+    assert client.get("/api/profiel", params=VRAAG | {"s": 9999}).status_code == 400
 
 
 def test_api_controle_meldt_te_weinig_dekking() -> None:
@@ -119,10 +124,13 @@ def test_api_lagen_geeft_lagen_en_wat_nog_volgt() -> None:
 def test_api_rd_en_wgs84_zetten_coordinaten_om() -> None:
     client = TestClient(maak_app(DEMO))
 
-    rd = client.get("/api/rd", params={"lon": 5.38720621, "lat": 52.1551744}).json()
+    rd = client.get("/api/rd", params={"punten": "5.38720621,52.1551744;4.9,52.37"}).json()[
+        "punten"
+    ]
     wgs = client.get("/api/wgs84", params={"x": 155000, "y": 463000}).json()
 
-    assert abs(rd["x"] - 155000) < 2
+    assert abs(rd[0][0] - 155000) < 2
+    assert len(rd) == 2
     assert abs(wgs["lat"] - 52.155) < 0.001
 
 
@@ -139,3 +147,29 @@ def test_api_zoek_geeft_suggesties_en_502_als_pdok_uitvalt(monkeypatch) -> None:
     monkeypatch.setattr(kaart, "haal_json", uitval)
     assert client.get("/api/zoek", params={"q": "Dam 1"}).status_code == 502
     assert client.get("/api/zoek/locatie", params={"id": "adr-1"}).status_code == 502
+
+
+def test_api_rd_weigert_slechte_punten() -> None:
+    client = TestClient(maak_app(DEMO))
+
+    assert client.get("/api/rd", params={"punten": "abc"}).status_code == 400
+    assert client.get("/api/rd", params={"punten": "5.3,52.1,7"}).status_code == 400
+
+
+def test_api_profiel_en_controle_werken_met_een_bocht() -> None:
+    client = TestClient(maak_app(DEMO))
+    punten = "121000,487000;121000,487300;121400,487300"
+
+    profiel = client.get("/api/profiel", params={"punten": punten, "s": 500}).json()
+    antwoord = client.post(
+        "/api/controle",
+        json={
+            "punten": [[121000, 487000], [121000, 487300], [121400, 487300]],
+            "s": 500,
+            "leidingen": [],
+        },
+    )
+
+    assert profiel["trace"]["azimut"] == 90
+    assert profiel["trace"]["knikken"] == [300.0]
+    assert antwoord.status_code == 200

@@ -37,10 +37,7 @@ class Settings(BaseSettings):
 class ControleIn(BaseModel):
     """Invoer voor de controle: het tracé, de positie langs het tracé en alle leidingen."""
 
-    ax: float
-    ay: float
-    bx: float
-    by: float
+    punten: list[tuple[float, float]]
     s: float
     leidingen: list[ontwerp.Leiding]
 
@@ -97,10 +94,18 @@ def haal_ingelogde_gebruiker(
 Ingelogd = Annotated[Gebruiker, Depends(haal_ingelogde_gebruiker)]
 
 
-def maak_trace(ax: float, ay: float, bx: float, by: float) -> kaart.Trace:
+def lees_punten(tekst: str) -> list[tuple[float, float]]:
+    """Lees 'x,y;x,y;...' en geef de paren, of 400 als het niet kan."""
+    try:
+        return [tuple(float(deel) for deel in paar.split(",")) for paar in tekst.split(";")]
+    except ValueError as fout:
+        raise HTTPException(status_code=400, detail="Punten zijn niet goed opgegeven.") from fout
+
+
+def maak_trace(punten: list[tuple[float, float]]) -> kaart.Trace:
     """Maak een tracé, of geef 400 met de Nederlandse melding."""
     try:
-        return kaart.Trace(ax, ay, bx, by)
+        return kaart.Trace(tuple(punten))
     except ValueError as fout:
         raise HTTPException(status_code=400, detail=str(fout)) from fout
 
@@ -191,9 +196,12 @@ def maak_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(status_code=502, detail=ZOEK_NIET_BEREIKBAAR) from fout
 
     @app.get("/api/rd")
-    def rd(_: Ingelogd, lon: float, lat: float) -> dict[str, float]:
-        x, y = kaart.wgs84_naar_rd(lon, lat)
-        return {"x": x, "y": y}
+    def rd(_: Ingelogd, punten: str) -> dict[str, list[list[float]]]:
+        """Zet 'lon,lat;lon,lat;...' om naar RD-paren."""
+        paren = lees_punten(punten)
+        if any(len(paar) != 2 for paar in paren):
+            raise HTTPException(status_code=400, detail="Punten zijn niet goed opgegeven.")
+        return {"punten": [list(kaart.wgs84_naar_rd(lon, lat)) for lon, lat in paren]}
 
     @app.get("/api/wgs84")
     def wgs84(_: Ingelogd, x: float, y: float) -> dict[str, float]:
@@ -201,9 +209,9 @@ def maak_app(settings: Settings | None = None) -> FastAPI:
         return {"lon": lon, "lat": lat}
 
     @app.get("/api/profiel")
-    def profiel(_: Ingelogd, ax: float, ay: float, bx: float, by: float, s: float = 0.0) -> dict:
+    def profiel(_: Ingelogd, punten: str, s: float = 0.0) -> dict:
         """Het 0-zicht met de bibliotheek, bestaande leidingen en de checklist."""
-        trace = maak_trace(ax, ay, bx, by)
+        trace = maak_trace(lees_punten(punten))
         try:
             antwoord = kaart.dwarsprofiel(trace, s)
         except ValueError as fout:
@@ -220,7 +228,7 @@ def maak_app(settings: Settings | None = None) -> FastAPI:
     @app.post("/api/controle")
     def controle(_: Ingelogd, invoer: ControleIn) -> dict:
         """Controleer alle leidingen en geef meldingen, posities en de checklist-status."""
-        trace = maak_trace(invoer.ax, invoer.ay, invoer.bx, invoer.by)
+        trace = maak_trace(invoer.punten)
         bovengrond = kaart.voorbeeld_bovengrond(trace.seed(invoer.s))
         try:
             meldingen, posities = ontwerp.controleer(bovengrond, invoer.leidingen)
