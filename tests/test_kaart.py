@@ -28,16 +28,16 @@ AMSTERDAM = (121000, 487000)
 
 
 def test_trace_noord_heeft_azimut_nul_en_positieve_u_is_west() -> None:
-    trace = Trace(121000, 487000, 121000, 487500)
+    trace = Trace.recht(121000, 487000, 121000, 487500)
     x, y = trace.punten(100, np.array([10.0]))
 
     assert trace.lengte == 500
-    assert trace.azimut == 0
+    assert trace.azimut() == 0
     assert (x[0], y[0]) == (120990, 487100)
 
 
 def test_trace_oost_heeft_azimut_negentig() -> None:
-    assert Trace(121000, 487000, 121500, 487000).azimut == 90
+    assert Trace.recht(121000, 487000, 121500, 487000).azimut() == 90
 
 
 @pytest.mark.parametrize(
@@ -50,11 +50,11 @@ def test_trace_oost_heeft_azimut_negentig() -> None:
 )
 def test_trace_weigert_onbruikbare_trace(hoeken, melding) -> None:
     with pytest.raises(ValueError, match=melding):
-        Trace(*hoeken)
+        Trace.recht(*hoeken)
 
 
 def test_seed_is_stabiel_per_stuk_van_100_meter() -> None:
-    trace = Trace(121000, 487000, 121000, 487500)
+    trace = Trace.recht(121000, 487000, 121000, 487500)
 
     assert trace.seed(10) == trace.seed(90)
     assert trace.seed(10) != trace.seed(110)
@@ -78,7 +78,7 @@ def test_zone_per_plaats(plaats, x, y, zone) -> None:
 
 
 def test_dwarsprofiel_heeft_stijgende_lagen_tot_vijftig_meter() -> None:
-    profiel = dwarsprofiel(Trace(*AMSTERDAM, 121000, 487500), 100)
+    profiel = dwarsprofiel(Trace.recht(*AMSTERDAM, 121000, 487500), 100)
     onder = np.array([laag["onderkant"] for laag in profiel["lagen"]])
 
     assert profiel["bron"] == "voorbeelddata"
@@ -89,7 +89,7 @@ def test_dwarsprofiel_heeft_stijgende_lagen_tot_vijftig_meter() -> None:
 
 
 def test_dwarsprofiel_is_deterministisch() -> None:
-    trace = Trace(*AMSTERDAM, 121000, 487500)
+    trace = Trace.recht(*AMSTERDAM, 121000, 487500)
 
     assert dwarsprofiel(trace, 100) == dwarsprofiel(trace, 100)
 
@@ -97,7 +97,7 @@ def test_dwarsprofiel_is_deterministisch() -> None:
 @pytest.mark.parametrize("s", [-1, 501])
 def test_dwarsprofiel_buiten_het_trace_geeft_fout(s) -> None:
     with pytest.raises(ValueError, match="buiten het tracé"):
-        dwarsprofiel(Trace(*AMSTERDAM, 121000, 487500), s)
+        dwarsprofiel(Trace.recht(*AMSTERDAM, 121000, 487500), s)
 
 
 def test_bovengrond_heeft_logische_volgorde_voor_veel_seeds() -> None:
@@ -179,3 +179,41 @@ def test_zoek_locatie_geeft_zoom_per_type_en_fout_bij_niets(monkeypatch) -> None
     monkeypatch.setattr(kaart, "haal_json", lambda url: {"response": {"docs": []}})
     with pytest.raises(LookupError):
         zoek_locatie("onbekend")
+
+
+BOCHT = Trace(((121000, 487000), (121000, 487300), (121400, 487300)))
+
+
+def test_trace_met_bocht_heeft_samengestelde_lengte_en_richting() -> None:
+    assert BOCHT.lengte == 700
+    assert BOCHT.afstanden == [0, 300, 700]
+    assert BOCHT.azimut(100) == 0
+    assert BOCHT.azimut(500) == 90
+
+
+def test_plek_volgt_de_bocht() -> None:
+    assert BOCHT.plek(150)[:2] == (121000, 487150)
+    assert BOCHT.plek(400)[:2] == (121100, 487300)
+    assert BOCHT.plek(9999)[:2] == (121400, 487300)
+
+
+def test_dwarsprofiel_toont_de_knik_en_de_richting_op_die_plek() -> None:
+    begin = dwarsprofiel(BOCHT, 100)
+    na_bocht = dwarsprofiel(BOCHT, 500)
+
+    assert begin["trace"]["knikken"] == [300.0]
+    assert begin["trace"]["azimut"] == 0
+    assert na_bocht["trace"]["azimut"] == 90
+
+
+@pytest.mark.parametrize(
+    ("punten", "melding"),
+    [
+        (((121000, 487000),), "minstens"),
+        (((121000, 487000), (121000, 487000), (121000, 487500)), "dezelfde plek"),
+        (tuple((121000 + i * 5, 487000) for i in range(201)), "maximaal"),
+    ],
+)
+def test_trace_weigert_onbruikbare_punten(punten, melding) -> None:
+    with pytest.raises(ValueError, match=melding):
+        Trace(punten)

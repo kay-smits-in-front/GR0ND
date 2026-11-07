@@ -70,39 +70,76 @@ KUSTKLEI, RIVIEREN, ZAND, DRENTS, LOESS = range(len(ZONES))
 DIKTEN = np.array([zone.dikten_m for zone in ZONES], dtype=float)
 
 
+MAX_KNIKPUNTEN = 200
+MIN_STUK_M = 1.0
+
+
 @dataclass(frozen=True)
 class Trace:
-    """Een rechte lijn van beginpunt A naar eindpunt B in RD-meters."""
+    """Een tracé van beginpunt tot eindpunt via knikpunten, in RD-meters."""
 
-    ax: float
-    ay: float
-    bx: float
-    by: float
+    knikpunten: tuple[tuple[float, float], ...]
 
     def __post_init__(self) -> None:
+        object.__setattr__(
+            self, "knikpunten", tuple((float(x), float(y)) for x, y in self.knikpunten)
+        )
         self.controleer()
+
+    @classmethod
+    def recht(cls, ax: float, ay: float, bx: float, by: float) -> "Trace":
+        return cls(((ax, ay), (bx, by)))
+
+    @property
+    def stukken(self) -> list[tuple[float, float, float, float, float]]:
+        """Per stuk tussen twee knikpunten: x, y van het begin, richting dx, dy en lengte."""
+        stukken = []
+        for (x0, y0), (x1, y1) in zip(self.knikpunten, self.knikpunten[1:], strict=False):
+            lengte = math.hypot(x1 - x0, y1 - y0)
+            stukken.append((x0, y0, (x1 - x0) / lengte, (y1 - y0) / lengte, lengte))
+        return stukken
 
     @property
     def lengte(self) -> float:
-        return math.hypot(self.bx - self.ax, self.by - self.ay)
+        return sum(stuk[4] for stuk in self.stukken)
+
+    def plek(self, s: float) -> tuple[float, float, float, float]:
+        """x, y en richting (dx, dy) op afstand s langs het tracé."""
+        rest = min(max(s, 0.0), self.lengte)
+        stukken = self.stukken
+        for x0, y0, dx, dy, lengte in stukken[:-1]:
+            if rest <= lengte:
+                return x0 + dx * rest, y0 + dy * rest, dx, dy
+            rest -= lengte
+        x0, y0, dx, dy, _ = stukken[-1]
+        return x0 + dx * rest, y0 + dy * rest, dx, dy
 
     @property
-    def richting(self) -> tuple[float, float]:
-        lengte = self.lengte
-        return (self.bx - self.ax) / lengte, (self.by - self.ay) / lengte
+    def afstanden(self) -> list[float]:
+        """Afstand langs het tracé van elk knikpunt, beginnend bij 0."""
+        totaal = [0.0]
+        for stuk in self.stukken:
+            totaal.append(totaal[-1] + stuk[4])
+        return totaal
 
-    @property
-    def azimut(self) -> float:
-        """Kompasrichting in graden (0 = noord, 90 = oost)."""
-        dx, dy = self.richting
+    def azimut(self, s: float = 0.0) -> float:
+        """Kompasrichting in graden (0 = noord, 90 = oost) op afstand s."""
+        _, _, dx, dy = self.plek(s)
         return math.degrees(math.atan2(dx, dy)) % 360
 
     def controleer(self) -> None:
         """Gooi een ValueError met een Nederlandse melding als het tracé niet kan."""
+        if len(self.knikpunten) < 2:
+            raise ValueError("Een tracé heeft minstens een begin- en een eindpunt.")
+        if len(self.knikpunten) > MAX_KNIKPUNTEN:
+            raise ValueError(f"Een tracé mag maximaal {MAX_KNIKPUNTEN} punten hebben.")
         x_min, y_min, x_max, y_max = RD_BEREIK
-        for x, y in ((self.ax, self.ay), (self.bx, self.by)):
+        for x, y in self.knikpunten:
             if not (x_min <= x <= x_max and y_min <= y <= y_max):
                 raise ValueError("Het tracé ligt buiten het RD-bereik van Nederland.")
+        for (x0, y0), (x1, y1) in zip(self.knikpunten, self.knikpunten[1:], strict=False):
+            if math.hypot(x1 - x0, y1 - y0) < MIN_STUK_M:
+                raise ValueError("Twee opeenvolgende punten liggen op dezelfde plek.")
         if self.lengte < MIN_TRACE_M:
             raise ValueError(f"Het tracé is te kort (minimaal {MIN_TRACE_M:.0f} m).")
         if self.lengte > MAX_TRACE_M:
@@ -110,13 +147,15 @@ class Trace:
 
     def punten(self, s: float, u: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         """RD-coördinaten van de punten op afstand s langs het tracé en u haaks erop."""
-        dx, dy = self.richting
-        return self.ax + dx * s - dy * u, self.ay + dy * s + dx * u
+        x, y, dx, dy = self.plek(s)
+        return x - dy * u, y + dx * u
 
     def seed(self, s: float) -> int:
         """Vaste waarde per tracé en stukje van 100 m, zodat dezelfde plek er hetzelfde uitziet."""
-        tekst = f"{self.ax:.0f},{self.ay:.0f},{self.bx:.0f},{self.by:.0f},{int(s // SEED_STAP_M)}"
-        return int(hashlib.sha256(tekst.encode()).hexdigest()[:12], 16)
+        punten = ";".join(f"{x:.0f},{y:.0f}" for x, y in self.knikpunten)
+        return int(
+            hashlib.sha256(f"{punten},{int(s // SEED_STAP_M)}".encode()).hexdigest()[:12], 16
+        )
 
 
 def zone_index(x: np.ndarray, y: np.ndarray) -> np.ndarray:
@@ -202,7 +241,8 @@ def dwarsprofiel(trace: Trace, s: float) -> dict:
         "bron": "voorbeelddata",
         "trace": {
             "lengte": round(trace.lengte, 1), "s": s, "x": round(float(xm[0]), 1),
-            "y": round(float(ym[0]), 1), "azimut": round(trace.azimut, 1),
+            "y": round(float(ym[0]), 1), "azimut": round(trace.azimut(s), 1),
+            "knikken": [round(afstand, 1) for afstand in trace.afstanden[1:-1]],
         },
         "zone": zone.naam,
         "grondwater": zone.grondwater_m,
