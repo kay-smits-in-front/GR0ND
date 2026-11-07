@@ -77,8 +77,16 @@
         <div id="toasts" class="toasts" aria-live="assertive"></div>
         <p id="status" class="status"></p>
         <div id="positie" class="positie" hidden>
-          <label for="positie-schuif">Positie langs het tracé</label>
-          <input id="positie-schuif" type="range" min="0" max="100" step="1" value="0" list="knikken" />
+          <button id="wandel-terug" type="button" title="Terug lopen (pijl links, ingedrukt houden)">◀</button>
+          <button id="wandel-loop" type="button" title="Automatisch vooruit lopen (spatie)">Loop</button>
+          <button id="wandel-vooruit" type="button" title="Vooruit lopen (pijl rechts, ingedrukt houden)">▶</button>
+          <label for="wandel-snelheid" class="verborgen">Snelheid</label>
+          <select id="wandel-snelheid" title="Loopsnelheid">
+            <option value="2">2 m/s</option>
+            <option value="10">10 m/s</option>
+            <option value="40">40 m/s</option>
+          </select>
+          <input id="positie-schuif" type="range" min="0" max="100" step="1" value="0" list="knikken" aria-label="Positie langs het tracé" />
           <datalist id="knikken"></datalist>
           <output id="positie-waarde"></output>
         </div>
