@@ -428,3 +428,106 @@ input[type="text"] {
     transition: none;
   }
 }
+
+/* Overzichtskaart (MapLibre) */
+#kaart {
+  position: absolute;
+  inset: 0;
+}
+
+.zoek {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 2;
+  display: block;
+  width: min(380px, calc(100% - 90px));
+  padding: 0;
+  border: 0;
+  background: none;
+  box-shadow: none;
+  backdrop-filter: none;
+  animation: none;
+}
+
+.zoek input {
+  min-height: 40px;
+  padding: 0 14px;
+  border: 1px solid var(--rand);
+  border-radius: 6px;
+  background: rgba(21, 24, 27, 0.94);
+  font-size: 14px;
+}
+
+.zoek-lijst {
+  margin: 4px 0 0;
+  padding: 4px;
+  list-style: none;
+  border: 1px solid var(--rand);
+  border-radius: 6px;
+  background: rgba(21, 24, 27, 0.98);
+}
+
+.zoek-lijst button {
+  width: 100%;
+  margin: 0;
+  font-weight: 400;
+  letter-spacing: 0;
+  min-height: 36px;
+  padding: 0 10px;
+  border: 0;
+  text-align: left;
+  font-size: 13px;
+}
+
+.keuzes {
+  display: grid;
+  gap: 2px;
+}
+
+.keuzes label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 32px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.keuzes input {
+  width: auto;
+  margin: 0;
+  padding: 0;
+  accent-color: var(--lijn);
+}
+
+.zacht-kop {
+  margin: 8px 0 0;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--tekst-zacht);
+}
+
+.volgt {
+  margin: 0;
+  padding-left: 16px;
+  font-size: 12px;
+  color: var(--tekst-zacht);
+}
+
+.marker-punt {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--lijn);
+  border: 2px solid #1a140d;
+  color: #1a140d;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.maplibregl-ctrl-attrib {
+  font-size: 11px;
+}

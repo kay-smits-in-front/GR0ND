@@ -22,6 +22,7 @@ from gr0nd.gebruikers import SESSIE_DUUR, Gebruiker, Gebruikers, Rol, Sessies
 STATIC_MAP = Path(__file__).parent / "static"
 SESSIE_COOKIE = "gr0nd_sessie"
 DEMO_GEBRUIKER = Gebruiker(id=0, email="demo@lokaal", rol=Rol.GEBRUIKER)
+ZOEK_NIET_BEREIKBAAR = "Zoeken is nu niet beschikbaar. Probeer het straks opnieuw."
 
 
 class Settings(BaseSettings):
@@ -167,6 +168,37 @@ def maak_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/api/nederland")
     def nederland(_: Ingelogd) -> dict:
         return kaart.nederland()
+
+    @app.get("/api/lagen")
+    def lagen(_: Ingelogd) -> dict:
+        """De kaartlagen die de kaart kan tonen, en de lagen die nog volgen."""
+        return kaart.kaartlagen()
+
+    @app.get("/api/zoek")
+    def zoek(_: Ingelogd, q: str) -> list[dict]:
+        try:
+            return kaart.zoek_locaties(q)
+        except OSError as fout:
+            raise HTTPException(status_code=502, detail=ZOEK_NIET_BEREIKBAAR) from fout
+
+    @app.get("/api/zoek/locatie")
+    def zoek_locatie(_: Ingelogd, id: str) -> dict:
+        try:
+            return kaart.zoek_locatie(id)
+        except LookupError as fout:
+            raise HTTPException(status_code=404, detail=str(fout)) from fout
+        except OSError as fout:
+            raise HTTPException(status_code=502, detail=ZOEK_NIET_BEREIKBAAR) from fout
+
+    @app.get("/api/rd")
+    def rd(_: Ingelogd, lon: float, lat: float) -> dict[str, float]:
+        x, y = kaart.wgs84_naar_rd(lon, lat)
+        return {"x": x, "y": y}
+
+    @app.get("/api/wgs84")
+    def wgs84(_: Ingelogd, x: float, y: float) -> dict[str, float]:
+        lon, lat = kaart.rd_naar_wgs84(x, y)
+        return {"lon": lon, "lat": lat}
 
     @app.get("/api/profiel")
     def profiel(_: Ingelogd, ax: float, ay: float, bx: float, by: float, s: float = 0.0) -> dict:

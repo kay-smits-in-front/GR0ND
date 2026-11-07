@@ -1,5 +1,6 @@
 from fastapi.testclient import TestClient
 
+from gr0nd import kaart
 from gr0nd.app import Settings, maak_app
 
 
@@ -106,3 +107,35 @@ def test_api_controle_geeft_422_bij_ontbrekende_buis() -> None:
     )
 
     assert antwoord.status_code == 422
+
+
+def test_api_lagen_geeft_lagen_en_wat_nog_volgt() -> None:
+    inhoud = TestClient(maak_app(DEMO)).get("/api/lagen").json()
+
+    assert any(laag["id"] == "luchtfoto" for laag in inhoud["lagen"])
+    assert inhoud["volgt"]
+
+
+def test_api_rd_en_wgs84_zetten_coordinaten_om() -> None:
+    client = TestClient(maak_app(DEMO))
+
+    rd = client.get("/api/rd", params={"lon": 5.38720621, "lat": 52.1551744}).json()
+    wgs = client.get("/api/wgs84", params={"x": 155000, "y": 463000}).json()
+
+    assert abs(rd["x"] - 155000) < 2
+    assert abs(wgs["lat"] - 52.155) < 0.001
+
+
+def test_api_zoek_geeft_suggesties_en_502_als_pdok_uitvalt(monkeypatch) -> None:
+    client = TestClient(maak_app(DEMO))
+    docs = [{"type": "adres", "weergavenaam": "Dam 1, Amsterdam", "id": "adr-1"}]
+    monkeypatch.setattr(kaart, "haal_json", lambda url: {"response": {"docs": docs}})
+
+    assert client.get("/api/zoek", params={"q": "Dam 1"}).json()[0]["id"] == "adr-1"
+
+    def uitval(url):
+        raise OSError("geen verbinding")
+
+    monkeypatch.setattr(kaart, "haal_json", uitval)
+    assert client.get("/api/zoek", params={"q": "Dam 1"}).status_code == 502
+    assert client.get("/api/zoek/locatie", params={"id": "adr-1"}).status_code == 502
