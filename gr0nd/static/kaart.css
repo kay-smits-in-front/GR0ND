@@ -374,7 +374,7 @@ input[type="text"] {
   display: flex;
   align-items: center;
   gap: 12px;
-  width: min(560px, calc(100% - 32px));
+  width: min(760px, calc(100% - 32px));
   padding: 8px 12px;
   transform: translateX(-50%);
   border: 1px solid var(--rand);
@@ -385,11 +385,23 @@ input[type="text"] {
 
 .positie input {
   flex: 1;
+  min-width: 80px;
   accent-color: var(--lijn);
 }
 
+.positie select {
+  min-height: 36px;
+  border: 1px solid var(--rand);
+  border-radius: 6px;
+  background: #0e1216;
+}
+
+.positie button {
+  flex: none;
+}
+
 .positie output {
-  min-width: 72px;
+  min-width: 120px;
   text-align: right;
   font-variant-numeric: tabular-nums;
 }

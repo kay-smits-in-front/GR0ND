@@ -1030,19 +1030,123 @@ function bindZicht() {
     herstelZicht();
     tekenZicht();
   });
-  let vertraging = null;
+  bindWandel();
+}
+
+/* ---------- wandelen langs het tracé ---------- */
+
+const wandel = { richting: 0, snelheid: 2, auto: false, positie: 0, bezig: false, tijd: 0, raf: 0 };
+
+function beperkPositie(s) {
+  return Math.min(Math.max(s, 0), traceLengte() - 0.01);
+}
+
+function toonPositie() {
+  const lengte = traceLengte();
+  $("positie-schuif").value = wandel.positie;
+  $("positie-waarde").textContent = `${nl(wandel.positie, 0)} m · nog ${nl(lengte - wandel.positie, 0)} m`;
+}
+
+async function ververs() {
+  if (wandel.bezig) return;
+  wandel.bezig = true;
+  try {
+    while (Math.abs(wandel.positie - staat.s) >= 0.5) {
+      await laadProfiel(wandel.positie);
+      await controleer();
+      toonInfo();
+    }
+  } catch (fout) {
+    stopWandelen();
+    toon(fout.message);
+  } finally {
+    wandel.bezig = false;
+  }
+}
+
+function zetPositie(s) {
+  wandel.positie = beperkPositie(s);
+  toonPositie();
+  ververs();
+}
+
+function stopWandelen() {
+  wandel.richting = 0;
+  wandel.auto = false;
+  cancelAnimationFrame(wandel.raf);
+  wandel.raf = 0;
+  $("wandel-loop").textContent = "Loop";
+  $("wandel-loop").setAttribute("aria-pressed", "false");
+}
+
+function wandelStap(nu) {
+  const dt = Math.min((nu - wandel.tijd) / 1000, 0.1);
+  wandel.tijd = nu;
+  const doel = wandel.positie + wandel.richting * wandel.snelheid * dt;
+  const einde = traceLengte() - 0.01;
+  if (doel >= einde && wandel.richting > 0) {
+    stopWandelen();
+    zetPositie(einde);
+    toon("Eindpunt B bereikt.");
+    return;
+  }
+  if (doel <= 0 && wandel.richting < 0) {
+    stopWandelen();
+    zetPositie(0);
+    return;
+  }
+  zetPositie(doel);
+  wandel.raf = requestAnimationFrame(wandelStap);
+}
+
+function startWandelen(richting) {
+  if (staat.weergave !== "zicht") return;
+  cancelAnimationFrame(wandel.raf);
+  wandel.richting = richting;
+  wandel.tijd = performance.now();
+  wandel.raf = requestAnimationFrame(wandelStap);
+}
+
+function zetAuto() {
+  if (wandel.auto) return stopWandelen();
+  startWandelen(1);
+  wandel.auto = true;
+  $("wandel-loop").textContent = "Stop";
+  $("wandel-loop").setAttribute("aria-pressed", "true");
+}
+
+function houdIngedrukt(knop, richting) {
+  knop.addEventListener("pointerdown", () => {
+    stopWandelen();
+    startWandelen(richting);
+  });
+  for (const naam of ["pointerup", "pointerleave", "pointercancel"]) {
+    knop.addEventListener(naam, () => !wandel.auto && stopWandelen());
+  }
+}
+
+function bindWandel() {
+  houdIngedrukt($("wandel-terug"), -1);
+  houdIngedrukt($("wandel-vooruit"), 1);
+  $("wandel-loop").addEventListener("click", zetAuto);
+  $("wandel-snelheid").addEventListener("change", (e) => (wandel.snelheid = Number(e.target.value)));
   $("positie-schuif").addEventListener("input", (e) => {
-    $("positie-waarde").textContent = `${e.target.value} m`;
-    clearTimeout(vertraging);
-    vertraging = setTimeout(async () => {
-      try {
-        await laadProfiel(Number(e.target.value));
-        await controleer();
-        toonInfo();
-      } catch (fout) {
-        toon(fout.message);
-      }
-    }, 150);
+    stopWandelen();
+    zetPositie(Number(e.target.value));
+  });
+  const richtingen = { ArrowRight: 1, ArrowUp: 1, w: 1, ArrowLeft: -1, ArrowDown: -1, s: -1 };
+  window.addEventListener("keydown", (e) => {
+    if (staat.weergave !== "zicht" || e.target.tagName === "INPUT" || e.target.tagName === "SELECT") return;
+    if (e.key === " ") {
+      e.preventDefault();
+      zetAuto();
+    } else if (e.key in richtingen && !e.repeat) {
+      stopWandelen();
+      startWandelen(richtingen[e.key]);
+    }
+  });
+  window.addEventListener("keyup", (e) => {
+    if (e.key in richtingen && !wandel.auto) stopWandelen();
   });
 }
 
@@ -1063,7 +1167,8 @@ async function openZicht() {
     schuif.max = Math.floor(lengte);
     schuif.value = staat.s;
     $("knikken").replaceChildren(...staat.profiel.trace.knikken.map((afstand) => Object.assign(document.createElement("option"), { value: afstand })));
-    $("positie-waarde").textContent = `${staat.s} m`;
+    wandel.positie = 0;
+    toonPositie();
   } catch (fout) {
     toon(fout.message);
     return;
@@ -1077,6 +1182,7 @@ async function openZicht() {
 
 function zetWeergave(naam) {
   staat.weergave = naam;
+  stopWandelen();
   const zichtActief = naam === "zicht";
   $("kaart").hidden = zichtActief;
   $("zoek-form").hidden = zichtActief;
