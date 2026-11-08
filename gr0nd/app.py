@@ -18,6 +18,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from gr0nd import kaart, ontwerp
 from gr0nd.database import Database
 from gr0nd.gebruikers import SESSIE_DUUR, Gebruiker, Gebruikers, Rol, Sessies
+from gr0nd.projecten import Project, Projecten, ProjectIn
 
 STATIC_MAP = Path(__file__).parent / "static"
 SESSIE_COOKIE = "gr0nd_sessie"
@@ -32,6 +33,7 @@ class Settings(BaseSettings):
 
     omgeving: str = "lokaal"
     database_url: str = ""
+    data_map: str = "data"  # hier staan de projecten (voorlopig als bestand)
 
 
 class ControleIn(BaseModel):
@@ -119,6 +121,7 @@ def maak_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings()
     app = FastAPI(title="GR0ND", version="0.1.0", lifespan=maak_levenscyclus(settings))
     app.state.settings = settings
+    projecten = Projecten(Path(settings.data_map) / "projecten.json")
 
     @app.get("/health")
     def health() -> dict[str, str]:
@@ -241,6 +244,26 @@ def maak_app(settings: Settings | None = None) -> FastAPI:
             "checklist": ontwerp.checklist_status(meldingen, heeft_nieuwe),
             "afstanden": ontwerp.meetlijnen(bovengrond, invoer.leidingen, posities),
         }
+
+    @app.get("/api/projecten")
+    def projecten_lijst(gebruiker: Ingelogd) -> list[Project]:
+        return projecten.lijst(gebruiker.id)
+
+    @app.post("/api/projecten", status_code=201)
+    def project_maak(gebruiker: Ingelogd, invoer: ProjectIn) -> Project:
+        return projecten.maak(gebruiker.id, invoer)
+
+    @app.put("/api/projecten/{project_id}")
+    def project_werk_bij(gebruiker: Ingelogd, project_id: str, invoer: ProjectIn) -> Project:
+        project = projecten.werk_bij(gebruiker.id, project_id, invoer)
+        if project is None:
+            raise HTTPException(status_code=404, detail="Project niet gevonden.")
+        return project
+
+    @app.delete("/api/projecten/{project_id}", status_code=204)
+    def project_verwijder(gebruiker: Ingelogd, project_id: str) -> None:
+        if not projecten.verwijder(gebruiker.id, project_id):
+            raise HTTPException(status_code=404, detail="Project niet gevonden.")
 
     app.mount("/static", StaticFiles(directory=STATIC_MAP), name="static")
     return app

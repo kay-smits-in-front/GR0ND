@@ -572,3 +572,26 @@ select {
   padding: 0;
   accent-color: var(--lijn);
 }
+
+.project-lijst {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.project-lijst li {
+  display: flex;
+  gap: 4px;
+}
+
+.project-lijst li button:first-child {
+  flex: 1;
+  text-align: left;
+}
+
+.project-lijst li button.actief-project {
+  border-color: var(--lijn);
+  color: var(--lijn);
+}
