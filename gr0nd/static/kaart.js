@@ -208,6 +208,7 @@ function gebiedBijwerken() {
   else info.textContent = "Klik punten op de kaart. Dubbelklik om af te ronden.";
   $("teken-gebied").setAttribute("aria-pressed", gebied.tekenen);
   $("wis-gebied").disabled = p.length === 0;
+  if (typeof bewaarKnopBijwerken === "function") bewaarKnopBijwerken();
   updateCursor();
 }
 
@@ -469,7 +470,10 @@ async function startKaart() {
   bouwLagenpaneel(catalogus);
   await new Promise((klaar) => kaartObj.on("load", klaar));
   voegTekenlagenToe();
+  voegProjectlagenToe();
   bindKaart();
+  bindProjecten();
+  await laadProjecten();
 }
 
 /* ---------- 0-zicht ---------- */
@@ -1344,4 +1348,190 @@ function bindMenus() {
     if (!e.target.closest(".menu")) sluitMenus();
   });
   document.addEventListener("keydown", (e) => e.key === "Escape" && sluitMenus());
+}
+
+/* ---------- projecten ---------- */
+
+const NEDERLAND_GRENS = [[2.0, 50.3], [8.4, 54.0]];
+const projecten = { lijst: [], open: null };
+
+function middenVan(ring) {
+  const lon = ring.reduce((som, p) => som + p[0], 0) / ring.length;
+  const lat = ring.reduce((som, p) => som + p[1], 0) / ring.length;
+  return [lon, lat];
+}
+
+function grensVan(ring) {
+  const lons = ring.map((p) => p[0]);
+  const lats = ring.map((p) => p[1]);
+  return [[Math.min(...lons), Math.min(...lats)], [Math.max(...lons), Math.max(...lats)]];
+}
+
+function projectFeatures(lijst) {
+  return lijst.flatMap((p) => {
+    const eigenschappen = { id: p.id, naam: p.naam };
+    return [
+      { type: "Feature", properties: eigenschappen, geometry: { type: "Polygon", coordinates: [[...p.gebied, p.gebied[0]]] } },
+      { type: "Feature", properties: eigenschappen, geometry: { type: "Point", coordinates: middenVan(p.gebied) } },
+    ];
+  });
+}
+
+function voegProjectlagenToe() {
+  kaartObj.addSource("projecten", { type: "geojson", data: leegGeo() });
+  kaartObj.addSource("masker", { type: "geojson", data: leegGeo() });
+  const onder = "gebied-vlak";
+  kaartObj.addLayer({
+    id: "masker", type: "fill", source: "masker",
+    paint: { "fill-color": "#0e1216", "fill-opacity": 0.94 },
+  }, onder);
+  kaartObj.addLayer({
+    id: "projecten-vlak", type: "fill", source: "projecten", minzoom: 9, filter: ["==", "$type", "Polygon"],
+    paint: { "fill-color": "#e5ddc7", "fill-opacity": 0.18 },
+  }, onder);
+  kaartObj.addLayer({
+    id: "projecten-rand", type: "line", source: "projecten", minzoom: 9, filter: ["==", "$type", "Polygon"],
+    paint: { "line-color": "#e5ddc7", "line-width": 2 },
+  }, onder);
+  kaartObj.addLayer({
+    id: "projecten-punt", type: "circle", source: "projecten", maxzoom: 9, filter: ["==", "$type", "Point"],
+    paint: { "circle-radius": 7, "circle-color": "#d4a572", "circle-stroke-color": "#1a140d", "circle-stroke-width": 2 },
+  }, onder);
+}
+
+async function laadProjecten() {
+  try {
+    projecten.lijst = await api("/api/projecten");
+  } catch (fout) {
+    return toon(fout.message);
+  }
+  toonProjecten();
+}
+
+function toonProjecten() {
+  const zichtbaar = projecten.open ? [] : projecten.lijst;
+  kaartObj.getSource("projecten").setData({ type: "FeatureCollection", features: projectFeatures(zichtbaar) });
+  const lijst = $("project-lijst");
+  lijst.replaceChildren();
+  for (const p of projecten.lijst) {
+    const rij = document.createElement("li");
+    const open = document.createElement("button");
+    open.type = "button";
+    open.textContent = p.naam;
+    open.classList.toggle("actief-project", projecten.open?.id === p.id);
+    open.addEventListener("click", () => openProject(p));
+    const weg = document.createElement("button");
+    weg.type = "button";
+    weg.textContent = "Verwijder";
+    weg.addEventListener("click", () => verwijderProject(p));
+    rij.append(open, weg);
+    lijst.append(rij);
+  }
+  $("sluit-project").disabled = !projecten.open;
+  bewaarKnopBijwerken();
+}
+
+function bewaarKnopBijwerken() {
+  $("bewaar-project").disabled = !(gebied.klaar && $("project-naam").value.trim());
+  $("bewaar-project").textContent = projecten.open ? "Werk project bij" : "Bewaar project";
+  $("project-info").textContent = projecten.open
+    ? `Project "${projecten.open.naam}" is open. Alleen dit gebied wordt getoond.`
+    : gebied.klaar ? "Geef een naam en bewaar het gebied." : "Teken eerst een gebied (maximaal 10 × 10 km).";
+}
+
+function projectInvoer() {
+  return {
+    naam: $("project-naam").value.trim(),
+    gebied: gebied.punten.filter((c, i, alle) => i === 0 || c.join() !== alle[i - 1].join()),
+    trace: staat.trace.ll,
+  };
+}
+
+async function bewaarProject() {
+  const open = projecten.open;
+  try {
+    const opgeslagen = await api(open ? `/api/projecten/${open.id}` : "/api/projecten", {
+      method: open ? "PUT" : "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(projectInvoer()),
+    });
+    projecten.lijst = open
+      ? projecten.lijst.map((p) => (p.id === opgeslagen.id ? opgeslagen : p))
+      : [...projecten.lijst, opgeslagen];
+    toon(`Project "${opgeslagen.naam}" bewaard.`);
+    openProject(opgeslagen);
+  } catch (fout) {
+    toon(fout.message);
+  }
+}
+
+async function verwijderProject(p) {
+  try {
+    await api(`/api/projecten/${p.id}`, { method: "DELETE" });
+  } catch (fout) {
+    return toon(fout.message);
+  }
+  projecten.lijst = projecten.lijst.filter((x) => x.id !== p.id);
+  if (projecten.open?.id === p.id) sluitProject();
+  else toonProjecten();
+}
+
+function maskerRond(ring) {
+  const wereld = [[-180, -85], [180, -85], [180, 85], [-180, 85], [-180, -85]];
+  return {
+    type: "FeatureCollection",
+    features: [{ type: "Feature", properties: {}, geometry: { type: "Polygon", coordinates: [wereld, [...ring, ring[0]].reverse()] } }],
+  };
+}
+
+async function herstelTrace(ll) {
+  staat.trace.ll = ll.map((p) => [...p]);
+  staat.trace.tekenen = false;
+  if (ll.length >= 2) await rondTraceAf();
+  else {
+    staat.trace.rd = [];
+    traceVeranderd();
+  }
+}
+
+async function openProject(p) {
+  projecten.open = p;
+  $("project-naam").value = p.naam;
+  gebied.punten = p.gebied.map((c) => [...c]);
+  gebied.klaar = true;
+  gebied.tekenen = false;
+  gebiedBijwerken();
+  kaartObj.getSource("masker").setData(maskerRond(p.gebied));
+  const grens = grensVan(p.gebied);
+  const ruimte = Math.max(grens[1][0] - grens[0][0], grens[1][1] - grens[0][1]) * 0.15;
+  kaartObj.setMaxBounds([[grens[0][0] - ruimte, grens[0][1] - ruimte], [grens[1][0] + ruimte, grens[1][1] + ruimte]]);
+  kaartObj.fitBounds(grens, { padding: 60, duration: 800 });
+  await herstelTrace(p.trace);
+  toonProjecten();
+}
+
+function sluitProject() {
+  projecten.open = null;
+  kaartObj.getSource("masker").setData(leegGeo());
+  kaartObj.setMaxBounds(NEDERLAND_GRENS);
+  kaartObj.fitBounds(NEDERLAND_GRENS, { padding: 20, duration: 800 });
+  wisGebied();
+  wisTrace();
+  $("project-naam").value = "";
+  toonProjecten();
+}
+
+function bindProjecten() {
+  $("bewaar-project").addEventListener("click", bewaarProject);
+  $("sluit-project").addEventListener("click", sluitProject);
+  $("project-naam").addEventListener("input", bewaarKnopBijwerken);
+  for (const laag of ["projecten-vlak", "projecten-punt"]) {
+    kaartObj.on("click", laag, (e) => {
+      if (staat.trace.tekenen || gebied.tekenen) return;
+      const p = projecten.lijst.find((x) => x.id === e.features[0].properties.id);
+      if (p) openProject(p);
+    });
+    kaartObj.on("mouseenter", laag, () => (kaartObj.getCanvas().style.cursor = "pointer"));
+    kaartObj.on("mouseleave", laag, updateCursor);
+  }
 }

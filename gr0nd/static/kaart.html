@@ -20,6 +20,19 @@
 
       <nav id="paneel-overzicht" class="menus" aria-label="Menu overzicht">
         <div class="menu">
+          <button type="button" aria-expanded="false" aria-haspopup="true">Project</button>
+          <section class="uitklap breed" hidden>
+            <label for="project-naam" class="zacht">Naam van het project</label>
+            <input id="project-naam" type="text" maxlength="80" autocomplete="off" />
+            <div class="knoppen">
+              <button id="bewaar-project" type="button" class="hoofd" disabled>Bewaar project</button>
+              <button id="sluit-project" type="button" disabled>Sluit project</button>
+            </div>
+            <p id="project-info" class="zacht">Teken eerst een gebied (maximaal 10 × 10 km).</p>
+            <ul id="project-lijst" class="project-lijst"></ul>
+          </section>
+        </div>
+        <div class="menu">
           <button type="button" aria-expanded="false" aria-haspopup="true">Gebied</button>
           <section class="uitklap" hidden>
             <div class="knoppen">
