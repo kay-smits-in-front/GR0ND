@@ -239,6 +239,7 @@ def maak_app(settings: Settings | None = None) -> FastAPI:
             "meldingen": [melding.model_dump() for melding in meldingen],
             "posities": posities_json(posities),
             "checklist": ontwerp.checklist_status(meldingen, heeft_nieuwe),
+            "afstanden": ontwerp.meetlijnen(bovengrond, invoer.leidingen, posities),
         }
 
     app.mount("/static", StaticFiles(directory=STATIC_MAP), name="static")

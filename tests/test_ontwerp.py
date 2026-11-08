@@ -3,9 +3,12 @@ import pytest
 from gr0nd.ontwerp import (
     TYPE_PER_ID,
     Leiding,
+    afstand_tot_weg,
     bestaande_leidingen,
     checklist_status,
     controleer,
+    meetlijnen,
+    terrein_op,
 )
 
 BOVENGROND = {
@@ -16,6 +19,7 @@ BOVENGROND = {
     "weg": {"teen_l": 3.0, "kruin0": 4.5, "kruin1": 11.5, "teen_r": 13.0,
             "hoogte": 0.5, "asfalt": 0.2},
     "lantaarn": {"u": 10.7, "hoogte": 5.0},
+    "perceel": {"grens": -9.0},
 }  # fmt: skip
 
 
@@ -55,7 +59,10 @@ def test_onder_de_weg_geeft_waarschuwing() -> None:
 
 
 def test_onder_een_huis_geeft_waarschuwing() -> None:
-    assert codes([nieuwe_kabel(-17, 1.5)]) == [("huis", "waarschuwing")]
+    assert codes([nieuwe_kabel(-17, 1.5)]) == [
+        ("terrein", "waarschuwing"),
+        ("huis", "waarschuwing"),
+    ]
 
 
 def test_raken_van_de_fundering_is_een_fout() -> None:
@@ -117,14 +124,20 @@ def test_onbekend_type_wordt_geweigerd() -> None:
 def test_checklist_is_open_zonder_nieuwe_leiding() -> None:
     status = checklist_status([], heeft_nieuwe_leiding=False)
 
-    assert set(status) == {"dekking", "afstand", "sloot"}
+    assert set(status) == {"dekking", "afstand", "sloot", "wegafstand", "terrein"}
     assert set(status.values()) == {"open"}
 
 
 def test_checklist_wordt_fout_bij_dekkingsmelding() -> None:
     meldingen, _ = controleer(BOVENGROND, [nieuwe_kabel(-8, 0.5)])
 
-    assert checklist_status(meldingen, True) == {"dekking": "fout", "afstand": "ok", "sloot": "ok"}
+    assert checklist_status(meldingen, True) == {
+        "dekking": "fout",
+        "afstand": "ok",
+        "sloot": "ok",
+        "wegafstand": "ok",
+        "terrein": "ok",
+    }
 
 
 def test_meeraderige_kabels_hebben_een_opbouw_voor_de_doorsnede() -> None:
@@ -132,3 +145,39 @@ def test_meeraderige_kabels_hebben_een_opbouw_voor_de_doorsnede() -> None:
     assert TYPE_PER_ID["ms3x150"].opbouw == "ader3"
     assert TYPE_PER_ID["ms3x150"].mantel is not None
     assert TYPE_PER_ID["ms240"].opbouw == "massief"
+
+
+def test_terrein_is_prive_links_en_openbaar_rechts_van_de_perceelgrens() -> None:
+    assert terrein_op(BOVENGROND, -15) == "prive"
+    assert terrein_op(BOVENGROND, -8) == "openbaar"
+
+
+def test_leiding_op_privegrond_geeft_een_waarschuwing_en_let_op_in_de_checklist() -> None:
+    meldingen, _ = controleer(BOVENGROND, [nieuwe_kabel(-10.5, 1.2)])
+
+    assert ("terrein", "waarschuwing") in [(m.code, m.niveau) for m in meldingen]
+    assert checklist_status(meldingen, True)["terrein"] == "let_op"
+
+
+def test_afstand_tot_weg_telt_vanaf_de_rand_van_de_leiding() -> None:
+    kabel = nieuwe_kabel(2.5, 1.2)
+
+    assert afstand_tot_weg(BOVENGROND, kabel) == pytest.approx(0.5 - kabel.straal)
+    assert afstand_tot_weg(BOVENGROND, nieuwe_kabel(8, 1.2)) == 0
+
+
+def test_te_dicht_bij_de_weg_is_een_fout() -> None:
+    assert ("weg_afstand", "fout") in codes([nieuwe_kabel(2.5, 1.2)])
+    assert "weg_afstand" not in [code for code, _ in codes([nieuwe_kabel(1.0, 1.2)])]
+
+
+def test_meetlijnen_geven_kabel_en_weg_met_afstand_en_oordeel() -> None:
+    bestaand = bestaande_leidingen(BOVENGROND)
+    nieuw = nieuwe_kabel(2.0, 1.2)
+    _, posities = controleer(BOVENGROND, [*bestaand, nieuw])
+
+    lijnen = {lijn["soort"]: lijn for lijn in meetlijnen(BOVENGROND, [*bestaand, nieuw], posities)}
+
+    assert lijnen["weg"]["afstand"] == pytest.approx(1.0 - nieuw.straal)
+    assert lijnen["weg"]["ok"] is False
+    assert lijnen["kabel"]["afstand"] > 0

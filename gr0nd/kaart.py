@@ -209,6 +209,8 @@ def voorbeeld_bovengrond(seed: int) -> dict:
     kruin_begin = round(teen_links + berm * 3, 2)
     kruin_eind = round(kruin_begin + 7.0, 2)
     huis_begin = round(-22.0 + verschuiving, 2)
+    huis_eind = round(huis_begin + 9.0, 2)
+    sloot_links = round(-3.0 + verschuiving - 2.0, 2)
     return {
         "huis": {
             "u0": huis_begin, "u1": round(huis_begin + 9.0, 2), "goot": 5.5, "nok": 9.5,
@@ -223,6 +225,8 @@ def voorbeeld_bovengrond(seed: int) -> dict:
             "teen_r": round(kruin_eind + berm * 3, 2), "hoogte": berm, "asfalt": 0.2,
         },
         "lantaarn": {"u": round(kruin_eind - 0.8, 2), "hoogte": 5.0},
+        # Perceelgrens: links is privéterrein (kavel van het huis), rechts openbaar.
+        "perceel": {"grens": round((huis_eind + sloot_links) / 2, 2)},
     }  # fmt: skip
 
 

@@ -110,6 +110,9 @@ def test_bovengrond_heeft_logische_volgorde_voor_veel_seeds() -> None:
         assert weg["teen_l"] < weg["kruin0"] < weg["kruin1"] < weg["teen_r"]
         assert weg["teen_r"] < 30
         assert huis["goot"] < huis["nok"]
+        assert (
+            huis["u1"] < grond["perceel"]["grens"] < sloot["u_midden"] - sloot["breedte_boven"] / 2
+        )
 
 
 def test_nederland_heeft_omtrek_en_zonekaart() -> None:
