@@ -52,3 +52,62 @@ def test_api_maakt_lijst_en_verwijdert_project(tmp_path) -> None:
     assert client.delete(f"/api/projecten/{nieuw.json()['id']}").status_code == 204
     assert client.delete("/api/projecten/bestaatniet").status_code == 404
     assert client.post("/api/projecten", json={"naam": "", "gebied": KLEIN}).status_code == 422
+
+
+def test_projectdata_haalt_wfs_en_ogc_api_parallel_en_zet_rd_om(tmp_path) -> None:
+    from gr0nd import projectdata
+    from gr0nd.projectdata import Bron
+
+    wfs = Bron("w", "WFS", "natuur", "wfs", "https://x/wfs", "laag")
+    api = Bron("o", "API", "erfgoed", "ogc_api", "https://x/api")
+    kapot = Bron("k", "Kapot", "natuur", "ogc_api", "https://x/kapot")
+
+    def nep(url: str) -> dict:
+        if "/kapot" in url:
+            raise OSError("niet bereikbaar")
+        if "/collections?" in url:
+            return {"collections": [{"id": "a"}]}
+        if "items" in url:
+            punt = {"type": "Point", "coordinates": [4.9, 52.37]}
+            return {"features": [{"geometry": punt, "properties": {"naam": "x", "leeg": None}}]}
+        punt = {"type": "Point", "coordinates": [121000.0, 487000.0]}
+        return {"features": [{"geometry": punt, "properties": {"id": 1}}, {"geometry": None}]}
+
+    data = projectdata.haal_projectdata(KLEIN, nep, (wfs, api, kapot))
+
+    status = {b["id"]: (b["status"], b["aantal"]) for b in data["bronnen"]}
+    assert status == {"w": ("ok", 1), "o": ("ok", 1), "k": ("fout", 0)}
+    lon, lat = next(f for f in data["features"] if f["properties"]["bron"] == "w")["geometry"][
+        "coordinates"
+    ]
+    assert (round(lon, 2), round(lat, 2)) == (4.89, 52.37)
+    assert all("leeg" not in f["properties"] for f in data["features"])
+    assert data["aandachtspunten"]
+
+
+def test_wfs_adres_vraagt_rd_omhullende_met_limiet() -> None:
+    from gr0nd.projectdata import BRONNEN, wfs_adres
+
+    adres = wfs_adres(BRONNEN[0], (4.89, 52.37, 4.90, 52.38))
+
+    assert "typeNames=natura2000%3Anatura2000" in adres
+    assert "EPSG%3A%3A28992" in adres
+    assert "count=2000" in adres
+
+
+def test_api_projectdata_bewaart_resultaat(tmp_path, monkeypatch) -> None:
+    from gr0nd import projectdata
+
+    aantal = []
+    monkeypatch.setattr(
+        projectdata, "haal_projectdata", lambda gebied: aantal.append(1) or {"features": []}
+    )
+    client = TestClient(maak_app(Settings(data_map=str(tmp_path))))
+    project = client.post("/api/projecten", json={"naam": "A", "gebied": KLEIN}).json()
+
+    client.get(f"/api/projecten/{project['id']}/data")
+    client.get(f"/api/projecten/{project['id']}/data")
+    client.get(f"/api/projecten/{project['id']}/data?vernieuw=true")
+
+    assert len(aantal) == 2
+    assert client.get("/api/projecten/bestaatniet/data").status_code == 404

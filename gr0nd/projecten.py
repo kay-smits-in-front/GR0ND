@@ -113,3 +113,19 @@ class Projecten:
         alles[str(gebruiker_id)] = rest
         self._schrijf(alles)
         return True
+
+    def data_pad(self, project_id: str) -> Path:
+        return self.pad.parent / "projectdata" / f"{project_id}.json"
+
+    def lees_data(self, project_id: str) -> dict | None:
+        """De eerder opgehaalde projectdata, of None als die er nog niet is."""
+        pad = self.data_pad(project_id)
+        return json.loads(pad.read_text(encoding="utf-8")) if pad.exists() else None
+
+    def bewaar_data(self, project_id: str, data: dict) -> None:
+        pad = self.data_pad(project_id)
+        pad.parent.mkdir(parents=True, exist_ok=True)
+        pad.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+
+    def zoek(self, gebruiker_id: int, project_id: str) -> Project | None:
+        return next((p for p in self.lijst(gebruiker_id) if p.id == project_id), None)

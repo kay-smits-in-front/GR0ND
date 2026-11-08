@@ -110,15 +110,42 @@ const markers = {};
 const gebied = { punten: [], tekenen: false, klaar: false };
 const leegGeo = () => ({ type: "FeatureCollection", features: [] });
 
+const LEGE_TEGEL = Uint8Array.from(
+  atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="),
+  (c) => c.charCodeAt(0),
+).buffer;
+const WERELD_M = 40075016.68;
+
+function tegelGrens(adres) {
+  const bbox = /bbox=([-\d.]+),([-\d.]+),([-\d.]+),([-\d.]+)/.exec(adres);
+  if (bbox) return bbox.slice(1, 5).map(Number);
+  const z = Number(/tilematrix=(\d+)/.exec(adres)[1]);
+  const x = Number(/tilecol=(\d+)/.exec(adres)[1]);
+  const y = Number(/tilerow=(\d+)/.exec(adres)[1]);
+  const maat = WERELD_M / 2 ** z;
+  const x0 = -WERELD_M / 2 + x * maat;
+  const y1 = WERELD_M / 2 - y * maat;
+  return [x0, y1 - maat, x0 + maat, y1];
+}
+
+function buitenProject(adres) {
+  const g = projecten.grens3857;
+  if (!g) return false;
+  const [x0, y0, x1, y1] = tegelGrens(adres);
+  return x1 < g[0] || x0 > g[2] || y1 < g[1] || y0 > g[3];
+}
+
 function registreerTegelprotocol() {
+  // Buiten het open project halen we geen tegels op: de kaart is daar toch donker.
   // PDOK-WMTS verwacht soms een tegelmatrix met voorloopnul ("07"); we proberen beide.
   maplibregl.addProtocol("pdok", async (params, afbreken) => {
     const adres = params.url.replace("pdok://", "https://");
-    const matrix = /tilematrix=(\d+)/.exec(adres)[1];
-    for (const waarde of [matrix.padStart(2, "0"), matrix]) {
-      const antwoord = await fetch(adres.replace(/tilematrix=\d+/, `tilematrix=${waarde}`), {
-        signal: afbreken.signal,
-      });
+    if (buitenProject(adres)) return { data: LEGE_TEGEL };
+    const matrix = /tilematrix=(\d+)/.exec(adres)?.[1];
+    const versies = matrix ? [matrix.padStart(2, "0"), matrix] : [null];
+    for (const waarde of versies) {
+      const url = waarde === null ? adres : adres.replace(/tilematrix=\d+/, `tilematrix=${waarde}`);
+      const antwoord = await fetch(url, { signal: afbreken.signal });
       if (antwoord.ok && (antwoord.headers.get("content-type") || "").startsWith("image/")) {
         return { data: await antwoord.arrayBuffer() };
       }
@@ -1353,7 +1380,8 @@ function bindMenus() {
 /* ---------- projecten ---------- */
 
 const NEDERLAND_GRENS = [[2.0, 50.3], [8.4, 54.0]];
-const projecten = { lijst: [], open: null };
+const projecten = { lijst: [], open: null, grens3857: null, data: null };
+const DATA_KLEUREN = { natuur: "#7fb069", erfgoed: "#b07fd0", grondwater: "#4aa3df" };
 
 function middenVan(ring) {
   const lon = ring.reduce((som, p) => som + p[0], 0) / ring.length;
@@ -1380,6 +1408,7 @@ function projectFeatures(lijst) {
 function voegProjectlagenToe() {
   kaartObj.addSource("projecten", { type: "geojson", data: leegGeo() });
   kaartObj.addSource("masker", { type: "geojson", data: leegGeo() });
+  kaartObj.addSource("projectdata", { type: "geojson", data: leegGeo() });
   const onder = "gebied-vlak";
   kaartObj.addLayer({
     id: "masker", type: "fill", source: "masker",
@@ -1392,6 +1421,19 @@ function voegProjectlagenToe() {
   kaartObj.addLayer({
     id: "projecten-rand", type: "line", source: "projecten", minzoom: 9, filter: ["==", "$type", "Polygon"],
     paint: { "line-color": "#e5ddc7", "line-width": 2 },
+  }, onder);
+  const kleur = ["match", ["get", "categorie"], ...Object.entries(DATA_KLEUREN).flat(), "#e5ddc7"];
+  kaartObj.addLayer({
+    id: "data-vlak", type: "fill", source: "projectdata", filter: ["==", "$type", "Polygon"],
+    paint: { "fill-color": kleur, "fill-opacity": 0.3 },
+  }, onder);
+  kaartObj.addLayer({
+    id: "data-lijn", type: "line", source: "projectdata", filter: ["!=", "$type", "Point"],
+    paint: { "line-color": kleur, "line-width": 1.5 },
+  }, onder);
+  kaartObj.addLayer({
+    id: "data-punt", type: "circle", source: "projectdata", filter: ["==", "$type", "Point"],
+    paint: { "circle-radius": 4, "circle-color": kleur, "circle-stroke-color": "#0e1216", "circle-stroke-width": 1 },
   }, onder);
   kaartObj.addLayer({
     id: "projecten-punt", type: "circle", source: "projecten", maxzoom: 9, filter: ["==", "$type", "Point"],
@@ -1504,14 +1546,18 @@ async function openProject(p) {
   kaartObj.getSource("masker").setData(maskerRond(p.gebied));
   const grens = grensVan(p.gebied);
   const ruimte = Math.max(grens[1][0] - grens[0][0], grens[1][1] - grens[0][1]) * 0.15;
+  projecten.grens3857 = [...naarMercator(grens[0][0] - ruimte, grens[0][1] - ruimte), ...naarMercator(grens[1][0] + ruimte, grens[1][1] + ruimte)];
   kaartObj.setMaxBounds([[grens[0][0] - ruimte, grens[0][1] - ruimte], [grens[1][0] + ruimte, grens[1][1] + ruimte]]);
   kaartObj.fitBounds(grens, { padding: 60, duration: 800 });
   await herstelTrace(p.trace);
   toonProjecten();
+  laadProjectdata(false);
 }
 
 function sluitProject() {
   projecten.open = null;
+  projecten.grens3857 = null;
+  wisProjectdata();
   kaartObj.getSource("masker").setData(leegGeo());
   kaartObj.setMaxBounds(NEDERLAND_GRENS);
   kaartObj.fitBounds(NEDERLAND_GRENS, { padding: 20, duration: 800 });
@@ -1525,6 +1571,7 @@ function bindProjecten() {
   $("bewaar-project").addEventListener("click", bewaarProject);
   $("sluit-project").addEventListener("click", sluitProject);
   $("project-naam").addEventListener("input", bewaarKnopBijwerken);
+  $("ververs-data").addEventListener("click", () => laadProjectdata(true));
   for (const laag of ["projecten-vlak", "projecten-punt"]) {
     kaartObj.on("click", laag, (e) => {
       if (staat.trace.tekenen || gebied.tekenen) return;
@@ -1533,5 +1580,72 @@ function bindProjecten() {
     });
     kaartObj.on("mouseenter", laag, () => (kaartObj.getCanvas().style.cursor = "pointer"));
     kaartObj.on("mouseleave", laag, updateCursor);
+  }
+}
+
+function naarMercator(lon, lat) {
+  const x = (lon * WERELD_M) / 360;
+  const y = (Math.log(Math.tan(Math.PI / 4 + (lat * Math.PI) / 360)) / Math.PI) * (WERELD_M / 2);
+  return [x, y];
+}
+
+/* ---------- projectdata: alleen voor het open projectgebied ---------- */
+
+function wisProjectdata() {
+  projecten.data = null;
+  kaartObj.getSource("projectdata").setData(leegGeo());
+  $("projectdata").hidden = true;
+}
+
+function lijstVullen(lijst, regels) {
+  lijst.replaceChildren(
+    ...regels.map((tekst) => Object.assign(document.createElement("li"), { textContent: tekst })),
+  );
+}
+
+function bronFilter() {
+  const aan = [...document.querySelectorAll("#data-bronnen input:checked")].map((i) => i.value);
+  for (const laag of ["data-vlak", "data-lijn", "data-punt"]) {
+    const soort = laag === "data-vlak" ? "Polygon" : laag === "data-punt" ? "Point" : null;
+    const basis = soort ? ["==", ["geometry-type"], soort] : ["!=", ["geometry-type"], "Point"];
+    kaartObj.setFilter(laag, ["all", basis, ["in", ["get", "bron"], ["literal", aan]]]);
+  }
+}
+
+function toonBronnen(data) {
+  const doos = $("data-bronnen");
+  doos.replaceChildren();
+  for (const bron of data.bronnen) {
+    const label = document.createElement("label");
+    const vinkje = Object.assign(document.createElement("input"), { type: "checkbox", value: bron.id });
+    vinkje.checked = bron.aantal > 0;
+    vinkje.disabled = bron.aantal === 0;
+    vinkje.addEventListener("change", bronFilter);
+    const stip = Object.assign(document.createElement("i"), { className: "bron-stip" });
+    stip.style.background = DATA_KLEUREN[bron.categorie] || "#e5ddc7";
+    const tekst = bron.status === "fout" ? `${bron.naam}: niet bereikbaar` : `${bron.naam} (${bron.aantal})`;
+    label.append(vinkje, stip, tekst);
+    label.title = bron.fout || "";
+    doos.append(label);
+  }
+}
+
+async function laadProjectdata(vernieuw) {
+  const project = projecten.open;
+  if (!project) return;
+  $("projectdata").hidden = false;
+  $("data-bronnen").textContent = "Data ophalen…";
+  try {
+    const data = await api(`/api/projecten/${project.id}/data${vernieuw ? "?vernieuw=true" : ""}`);
+    if (projecten.open?.id !== project.id) return;
+    projecten.data = data;
+    kaartObj.getSource("projectdata").setData({ type: "FeatureCollection", features: data.features });
+    toonBronnen(data);
+    bronFilter();
+    lijstVullen($("data-punten"), data.aandachtspunten.map((p) => `${p.titel}: ${p.tekst}`));
+    lijstVullen($("data-volgt"), data.nog_te_koppelen);
+  } catch (fout) {
+    $("data-bronnen").textContent = "";
+    toon(fout.message);
   }
 }

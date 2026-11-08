@@ -15,7 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from gr0nd import kaart, ontwerp
+from gr0nd import kaart, ontwerp, projectdata
 from gr0nd.database import Database
 from gr0nd.gebruikers import SESSIE_DUUR, Gebruiker, Gebruikers, Rol, Sessies
 from gr0nd.projecten import Project, Projecten, ProjectIn
@@ -264,6 +264,17 @@ def maak_app(settings: Settings | None = None) -> FastAPI:
     def project_verwijder(gebruiker: Ingelogd, project_id: str) -> None:
         if not projecten.verwijder(gebruiker.id, project_id):
             raise HTTPException(status_code=404, detail="Project niet gevonden.")
+
+    @app.get("/api/projecten/{project_id}/data")
+    def project_data(gebruiker: Ingelogd, project_id: str, vernieuw: bool = False) -> dict:
+        project = projecten.zoek(gebruiker.id, project_id)
+        if project is None:
+            raise HTTPException(status_code=404, detail="Project niet gevonden.")
+        data = None if vernieuw else projecten.lees_data(project_id)
+        if data is None:
+            data = projectdata.haal_projectdata(project.gebied)
+            projecten.bewaar_data(project_id, data)
+        return data
 
     app.mount("/static", StaticFiles(directory=STATIC_MAP), name="static")
     return app

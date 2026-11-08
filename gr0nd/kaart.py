@@ -309,7 +309,7 @@ class KaartLaag:
     id: str
     naam: str
     groep: str  # "achtergrond" (kies er één) of "laag" (aan en uit)
-    tegels: str  # tegel-URL voor MapLibre; pdok:// betekent: tegelmatrix met nul opvullen
+    tegels: str  # tegel-URL voor MapLibre; pdok:// loopt via onze eigen tegelhandler
     bron: str
     standaard: bool = False
     max_zoom: int = 19
@@ -333,7 +333,7 @@ def wms_tegels(pad: str, lagen: str) -> str:
         f"service=WMS&version=1.3.0&request=GetMap&layers={lagen}&styles=&format=image/png"
         "&transparent=true&crs=EPSG:3857&width=256&height=256&bbox={bbox-epsg-3857}"
     )
-    return f"https://{PDOK}{pad}?{vraag}"
+    return f"pdok://{PDOK}{pad}?{vraag}"
 
 
 KAARTLAGEN = (
