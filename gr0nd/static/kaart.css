@@ -6,7 +6,10 @@
   --fout: #d9534f;
   --waarschuwing: #e0a43a;
   --goed: #7fb069;
-  --ruimte: 8px;
+  --ruimte: 6px;
+  --straal: 2px;
+  --balk: #0a2a33;
+  font-size: 12px;
 }
 
 [hidden] {
@@ -15,7 +18,9 @@
 
 body.app {
   display: grid;
-  grid-template-rows: 48px 1fr;
+  grid-template-rows: 36px 1fr;
+  font-family: "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
+  font-size: 12px;
   height: 100vh;
   height: 100svh;
   min-height: 0;
@@ -25,14 +30,17 @@ body.app {
 .balk {
   display: flex;
   align-items: center;
-  gap: 24px;
-  padding: 0 16px;
+  gap: 16px;
+  padding: 0 8px 0 12px;
   border-bottom: 1px solid var(--rand);
-  background: var(--paneel);
+  background: var(--balk);
+  position: relative;
+  z-index: 30;
 }
 
 .merk-klein {
   font-weight: 600;
+  font-size: 13px;
   letter-spacing: 0.16em;
 }
 
@@ -43,7 +51,7 @@ body.app {
 
 .balk-info {
   margin: 0 0 0 auto;
-  font-size: 13px;
+  font-size: 11px;
   color: var(--tekst-zacht);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -51,23 +59,35 @@ body.app {
 }
 
 button,
-input {
+input,
+select {
   font: inherit;
+  font-size: 12px;
   color: inherit;
 }
 
 button {
-  min-height: 36px;
-  padding: 0 12px;
+  width: auto;
+  min-height: 26px;
+  margin: 0;
+  padding: 0 10px;
   border: 1px solid var(--rand);
-  border-radius: 6px;
+  border-radius: var(--straal);
   background: transparent;
+  font-weight: 400;
+  letter-spacing: 0;
   cursor: pointer;
-  transition: background 120ms ease, border-color 120ms ease;
+  transition: background 100ms ease, border-color 100ms ease;
+  filter: none;
 }
 
 button:hover:not(:disabled) {
-  background: rgba(238, 230, 217, 0.08);
+  background: rgba(238, 230, 217, 0.1);
+  filter: none;
+}
+
+button:active {
+  transform: none;
 }
 
 button:disabled {
@@ -76,10 +96,11 @@ button:disabled {
 }
 
 button[aria-pressed="true"],
-button.actief {
+button.actief,
+button[aria-expanded="true"] {
   border-color: var(--lijn);
   color: var(--lijn);
-  background: rgba(212, 165, 114, 0.1);
+  background: rgba(212, 165, 114, 0.12);
 }
 
 button.hoofd {
@@ -94,76 +115,73 @@ button.hoofd:hover:not(:disabled) {
 }
 
 :focus-visible {
-  outline: 2px solid var(--lijn);
-  outline-offset: 2px;
+  outline: 1px solid var(--lijn);
+  outline-offset: 1px;
 }
 
-input[type="text"] {
-  min-height: 36px;
-  padding: 0 10px;
+input[type="text"],
+input[type="search"],
+select {
+  width: auto;
+  min-height: 26px;
+  padding: 0 8px;
   border: 1px solid var(--rand);
-  border-radius: 6px;
+  border-radius: var(--straal);
   background: #0e1216;
+  box-shadow: none;
+}
+
+/* Menubalk met uitklappende panelen */
+.menus {
+  display: flex;
+  gap: 2px;
+  align-self: stretch;
+  align-items: center;
+}
+
+.menu {
+  position: relative;
+}
+
+.menu > button {
+  border-color: transparent;
+}
+
+.uitklap {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  display: grid;
+  gap: var(--ruimte);
+  width: 280px;
+  max-height: calc(100svh - 56px);
+  padding: 10px;
+  overflow-y: auto;
+  border: 1px solid var(--rand);
+  border-radius: var(--straal);
+  background: var(--paneel);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+
+.uitklap.breed {
+  width: 340px;
 }
 
 .werk {
   display: grid;
-  grid-template-columns: auto 1fr;
+  grid-template-columns: minmax(0, 1fr);
   min-height: 0;
-}
-
-.links {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  width: 320px;
-  padding: 16px;
-  overflow-y: auto;
-  border-right: 1px solid var(--rand);
-  background: var(--paneel);
-}
-
-.links-zicht {
-  flex-direction: row;
-  width: auto;
-  gap: 0;
-  padding: 0;
-}
-
-.paneel {
-  display: flex;
-  flex-direction: column;
-  gap: var(--ruimte);
-}
-
-.paneel h2 {
-  margin: 0;
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--tekst-zacht);
 }
 
 .knoppen {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
-}
-
-.rij {
-  display: grid;
-  gap: 6px;
-}
-
-.rij label {
-  font-size: 13px;
-  color: var(--tekst-zacht);
+  gap: 4px;
 }
 
 .zacht {
   margin: 0;
-  font-size: 13px;
+  font-size: 11px;
   color: var(--tekst-zacht);
 }
 
@@ -173,7 +191,7 @@ input[type="text"] {
   margin: 0;
   padding: 0;
   list-style: none;
-  font-size: 13px;
+  font-size: 12px;
 }
 
 .legenda i {
@@ -185,26 +203,14 @@ input[type="text"] {
   vertical-align: -1px;
 }
 
-/* 0-zicht: smalle Tools naast een bredere Checklist */
-.tools {
-  width: 148px;
-  padding: 16px 12px;
-  border-right: 1px solid var(--rand);
-}
-
-.checklist {
-  width: 300px;
-  padding: 16px;
-  overflow-y: auto;
-}
-
+/* 0-zicht: Tools en Checklist in de uitklappanelen */
 .tools-lijst {
   display: grid;
-  gap: 4px;
+  gap: 2px;
 }
 
 .tools-lijst h3 {
-  margin: 8px 0 2px;
+  margin: 6px 0 2px;
   font-size: 11px;
   font-weight: 600;
   color: var(--tekst-zacht);
@@ -215,14 +221,13 @@ input[type="text"] {
   align-items: center;
   gap: 8px;
   text-align: left;
-  font-size: 13px;
   padding: 0 8px;
 }
 
 .tools-lijst i {
   flex: none;
-  width: 14px;
-  height: 14px;
+  width: 12px;
+  height: 12px;
   border-radius: 50%;
   border: 1px solid rgba(238, 230, 217, 0.4);
 }
@@ -233,7 +238,7 @@ input[type="text"] {
   margin: 0;
   padding: 0;
   list-style: none;
-  font-size: 13px;
+  font-size: 12px;
 }
 
 #checklist li {
@@ -307,8 +312,8 @@ input[type="text"] {
 
 .meldingen {
   position: absolute;
-  top: 28px;
-  right: 16px;
+  top: 12px;
+  right: 12px;
   display: grid;
   gap: 8px;
   width: min(320px, calc(100% - 32px));
@@ -319,9 +324,9 @@ input[type="text"] {
   padding: 8px 12px;
   border: 1px solid var(--rand);
   border-left: 4px solid var(--tekst-zacht);
-  border-radius: 6px;
+  border-radius: var(--straal);
   background: rgba(21, 24, 27, 0.94);
-  font-size: 13px;
+  font-size: 12px;
 }
 
 .melding.fout {
@@ -347,10 +352,10 @@ input[type="text"] {
 
 .toast {
   padding: 8px 14px;
-  border-radius: 6px;
+  border-radius: var(--straal);
   background: #2a1614;
   border: 1px solid var(--fout);
-  font-size: 13px;
+  font-size: 12px;
 }
 
 .status {
@@ -373,14 +378,14 @@ input[type="text"] {
   bottom: 12px;
   display: flex;
   align-items: center;
-  gap: 12px;
-  width: min(760px, calc(100% - 32px));
-  padding: 8px 12px;
+  gap: 8px;
+  width: min(680px, calc(100% - 32px));
+  padding: 6px 8px;
   transform: translateX(-50%);
   border: 1px solid var(--rand);
-  border-radius: 6px;
+  border-radius: var(--straal);
   background: rgba(21, 24, 27, 0.94);
-  font-size: 13px;
+  font-size: 12px;
 }
 
 .positie input {
@@ -395,10 +400,10 @@ input[type="text"] {
 
 .positie select {
   flex: none;
-  min-height: 36px;
+  min-height: 26px;
   padding: 0 6px;
   border: 1px solid var(--rand);
-  border-radius: 6px;
+  border-radius: var(--straal);
   background: #0e1216;
 }
 
@@ -410,7 +415,7 @@ input[type="text"] {
   border: 1px solid var(--rand);
   background: transparent;
   color: inherit;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 400;
   letter-spacing: 0;
 }
@@ -427,30 +432,20 @@ input[type="text"] {
 }
 
 @media (max-width: 900px) {
-  .werk {
-    grid-template-columns: 1fr;
-    grid-template-rows: auto 1fr;
-  }
-
-  .links,
-  .links-zicht {
-    width: auto;
-    max-height: 38vh;
-    border-right: 0;
-    border-bottom: 1px solid var(--rand);
-  }
-
-  .links-zicht {
-    flex-direction: column;
-  }
-
-  .tools,
-  .checklist {
-    width: auto;
+  .balk {
+    overflow-x: auto;
   }
 
   .balk-info {
     display: none;
+  }
+
+  .uitklap {
+    position: fixed;
+    top: 40px;
+    left: 8px;
+    right: 8px;
+    width: auto;
   }
 }
 
@@ -483,10 +478,10 @@ input[type="text"] {
 }
 
 .zoek input {
-  min-height: 40px;
+  min-height: 28px;
   padding: 0 14px;
   border: 1px solid var(--rand);
-  border-radius: 6px;
+  border-radius: var(--straal);
   background: rgba(21, 24, 27, 0.94);
   font-size: 14px;
 }
@@ -496,7 +491,7 @@ input[type="text"] {
   padding: 4px;
   list-style: none;
   border: 1px solid var(--rand);
-  border-radius: 6px;
+  border-radius: var(--straal);
   background: rgba(21, 24, 27, 0.98);
 }
 
@@ -505,11 +500,11 @@ input[type="text"] {
   margin: 0;
   font-weight: 400;
   letter-spacing: 0;
-  min-height: 36px;
+  min-height: 26px;
   padding: 0 10px;
   border: 0;
   text-align: left;
-  font-size: 13px;
+  font-size: 12px;
 }
 
 .keuzes {
@@ -521,8 +516,8 @@ input[type="text"] {
   display: flex;
   align-items: center;
   gap: 10px;
-  min-height: 32px;
-  font-size: 13px;
+  min-height: 26px;
+  font-size: 12px;
   cursor: pointer;
 }
 
@@ -562,4 +557,13 @@ input[type="text"] {
 
 .maplibregl-ctrl-attrib {
   font-size: 11px;
+}
+
+#checklist input[type="checkbox"] {
+  width: 14px;
+  min-height: 0;
+  height: 14px;
+  margin: 2px 0 0;
+  padding: 0;
+  accent-color: var(--lijn);
 }

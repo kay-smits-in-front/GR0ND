@@ -17,54 +17,69 @@
         <button id="tab-overzicht" type="button" aria-pressed="true">Overzicht</button>
         <button id="tab-zicht" type="button" aria-pressed="false" disabled>0-zicht</button>
       </nav>
+
+      <nav id="paneel-overzicht" class="menus" aria-label="Menu overzicht">
+        <div class="menu">
+          <button type="button" aria-expanded="false" aria-haspopup="true">Gebied</button>
+          <section class="uitklap" hidden>
+            <div class="knoppen">
+              <button id="teken-gebied" type="button" aria-pressed="false">Teken gebied</button>
+              <button id="wis-gebied" type="button" disabled>Wis gebied</button>
+            </div>
+            <p id="gebied-info" class="zacht">Klik punten op de kaart. Dubbelklik om af te ronden.</p>
+          </section>
+        </div>
+        <div class="menu">
+          <button type="button" aria-expanded="false" aria-haspopup="true">Tracé</button>
+          <section class="uitklap" hidden>
+            <div class="knoppen">
+              <button id="teken-trace" type="button" aria-pressed="false">Teken tracé</button>
+              <button id="klaar-trace" type="button" disabled>Klaar</button>
+              <button id="laatste-punt" type="button" disabled>Laatste punt weg</button>
+              <button id="wis-trace" type="button" disabled>Wis tracé</button>
+            </div>
+            <p id="trace-info" class="zacht">Kies Teken tracé en klik de route op de kaart, ook met bochten.</p>
+            <button id="open-zicht" type="button" class="hoofd" disabled>Open 0-zicht</button>
+          </section>
+        </div>
+        <div class="menu">
+          <button type="button" aria-expanded="false" aria-haspopup="true">Achtergrond</button>
+          <section class="uitklap" hidden>
+            <div id="achtergronden" class="keuzes"></div>
+          </section>
+        </div>
+        <div class="menu">
+          <button type="button" aria-expanded="false" aria-haspopup="true">Lagen</button>
+          <section class="uitklap" hidden>
+            <div id="lagen" class="keuzes"></div>
+            <h3 class="zacht-kop">Volgt nog</h3>
+            <ul id="lagen-volgt" class="volgt"></ul>
+          </section>
+        </div>
+      </nav>
+
+      <nav id="paneel-zicht" class="menus" aria-label="Menu 0-zicht" hidden>
+        <div class="menu">
+          <button type="button" aria-expanded="false" aria-haspopup="true">Tools</button>
+          <section class="uitklap" hidden>
+            <div id="tools" class="tools-lijst"></div>
+            <button id="herstel" type="button">Herstel zicht</button>
+          </section>
+        </div>
+        <div class="menu">
+          <button type="button" aria-expanded="false" aria-haspopup="true">
+            Checklist <span id="checklist-teller" class="zacht"></span>
+          </button>
+          <section class="uitklap breed" hidden>
+            <ul id="checklist"></ul>
+          </section>
+        </div>
+      </nav>
+
       <p id="balk-info" class="balk-info">Voorbeelddata: grond, bovengrond en leidingen zijn nog niet echt.</p>
     </header>
 
     <main class="werk">
-      <aside id="paneel-overzicht" class="links">
-        <section class="paneel">
-          <h2>Gebied</h2>
-          <div class="knoppen">
-            <button id="teken-gebied" type="button" aria-pressed="false">Teken gebied</button>
-            <button id="wis-gebied" type="button" disabled>Wis gebied</button>
-          </div>
-          <p id="gebied-info" class="zacht">Klik punten op de kaart. Dubbelklik om af te ronden.</p>
-        </section>
-        <section class="paneel">
-          <h2>Tracé</h2>
-          <div class="knoppen">
-            <button id="teken-trace" type="button" aria-pressed="false">Teken tracé</button>
-            <button id="klaar-trace" type="button" disabled>Klaar</button>
-            <button id="laatste-punt" type="button" disabled>Laatste punt weg</button>
-            <button id="wis-trace" type="button" disabled>Wis tracé</button>
-          </div>
-          <p id="trace-info" class="zacht">Kies Teken tracé en klik de route op de kaart, ook met bochten.</p>
-          <button id="open-zicht" type="button" class="hoofd" disabled>Open 0-zicht</button>
-        </section>
-        <section class="paneel">
-          <h2>Achtergrond</h2>
-          <div id="achtergronden" class="keuzes"></div>
-        </section>
-        <section class="paneel">
-          <h2>Lagen</h2>
-          <div id="lagen" class="keuzes"></div>
-          <h3 class="zacht-kop">Volgt nog</h3>
-          <ul id="lagen-volgt" class="volgt"></ul>
-        </section>
-      </aside>
-
-      <aside id="paneel-zicht" class="links links-zicht" hidden>
-        <section class="paneel tools">
-          <h2>Tools</h2>
-          <div id="tools" class="tools-lijst"></div>
-          <button id="herstel" type="button">Herstel zicht</button>
-        </section>
-        <section class="paneel checklist">
-          <h2>Checklist <span id="checklist-teller" class="zacht"></span></h2>
-          <ul id="checklist"></ul>
-        </section>
-      </aside>
-
       <section id="vlak" class="werkvlak">
         <div id="kaart" aria-label="Kaart van Nederland"></div>
         <form id="zoek-form" class="zoek" role="search" autocomplete="off">

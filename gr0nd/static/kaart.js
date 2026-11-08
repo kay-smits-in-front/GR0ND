@@ -1061,6 +1061,7 @@ function bindZicht() {
     tekenZicht();
   });
   bindWandel();
+  bindMenus();
 }
 
 /* ---------- wandelen langs het tracé ---------- */
@@ -1247,3 +1248,29 @@ async function start() {
 }
 
 start();
+
+/* ---------- menubalk: uitklappende panelen ---------- */
+
+function sluitMenus(behalve = null) {
+  for (const menu of document.querySelectorAll(".menu")) {
+    if (menu === behalve) continue;
+    menu.querySelector(".uitklap").hidden = true;
+    menu.querySelector("button").setAttribute("aria-expanded", "false");
+  }
+}
+
+function bindMenus() {
+  for (const menu of document.querySelectorAll(".menu")) {
+    const knop = menu.querySelector("button");
+    const paneel = menu.querySelector(".uitklap");
+    knop.addEventListener("click", () => {
+      sluitMenus(menu);
+      paneel.hidden = !paneel.hidden;
+      knop.setAttribute("aria-expanded", String(!paneel.hidden));
+    });
+  }
+  document.addEventListener("pointerdown", (e) => {
+    if (!e.target.closest(".menu")) sluitMenus();
+  });
+  document.addEventListener("keydown", (e) => e.key === "Escape" && sluitMenus());
+}
