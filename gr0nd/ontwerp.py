@@ -18,6 +18,8 @@ from gr0nd.kaart import DIEPTE_M
 
 DEKKING_MIN_M = 0.8  # middenspanning en buizen (laagspanning: 0,6 m, nog geen type)
 AFSTAND_MIN_M = 0.5  # tot bestaande kabels en leidingen van een netbeheerder
+WEG_AFSTAND_MIN_M = 1.0  # indicatief: van de rand van het wegprofiel; de wegbeheerder bepaalt dit
+MEET_BEREIK_M = 8.0  # verder dan dit tonen we geen maatlijn naar de weg
 SLOOT_PUNTEN = 16  # aantal punten waarmee de rand van een leiding op de sloot wordt getoetst
 
 
@@ -77,6 +79,10 @@ CHECKLIST = (
     ChecklistItem("afstand", "Minimaal 50 cm tot bestaande kabels en leidingen",
                   "Netbeheer Nederland", ("afstand", "buis_vol")),
     ChecklistItem("sloot", "Niet in of door een sloot of waterloop", "Ontwerpregel", ("sloot",)),
+    ChecklistItem("wegafstand", "Minimaal 1 m van de rand van de weg (of er loodrecht onder)",
+                  "Wegbeheerder, indicatief", ("weg_afstand",)),
+    ChecklistItem("terrein", "Openbaar terrein, of toestemming van de eigenaar bij privéterrein",
+                  "Eigen lijst", ("terrein",)),
     ChecklistItem("bestaand", "Ligging bestaande leidingen gecontroleerd (proefsleuf of radar)",
                   "Netbeheer Nederland"),
     ChecklistItem("klic", "KLIC-melding gedaan voor het graven", "WIBON"),
@@ -147,6 +153,21 @@ def oppervlak_hoogte(bovengrond: dict, u: float) -> float:
     if weg["kruin1"] < u <= weg["teen_r"]:
         return weg["hoogte"] * (weg["teen_r"] - u) / (weg["teen_r"] - weg["kruin1"])
     return -sloot_diepte(bovengrond, u)
+
+
+def terrein_op(bovengrond: dict, u: float) -> str:
+    """'prive' links van de perceelgrens, anders 'openbaar'."""
+    return "prive" if u < bovengrond["perceel"]["grens"] else "openbaar"
+
+
+def afstand_tot_weg(bovengrond: dict, leiding: Leiding) -> float:
+    """Horizontale ruimte van de rand van de leiding tot het wegprofiel (0 als erin of eronder)."""
+    weg = bovengrond["weg"]
+    if weg["teen_l"] <= leiding.u <= weg["teen_r"]:
+        return 0.0
+    naar_links = weg["teen_l"] - leiding.u
+    naar_rechts = leiding.u - weg["teen_r"]
+    return max(max(naar_links, naar_rechts) - leiding.straal, 0.0)
 
 
 def raakt_sloot(bovengrond: dict, u: float, diepte: float, straal: float) -> bool:
@@ -221,6 +242,11 @@ def controleer_leiding(
     weg = bovengrond["weg"]
     if weg["teen_l"] <= leiding.u <= weg["teen_r"]:
         melding("weg", "waarschuwing", "U gaat onder de weg door.")
+    elif 0 < (gat := afstand_tot_weg(bovengrond, leiding)) < WEG_AFSTAND_MIN_M:
+        tekst = f"{cm(gat)} tot de weg, minimaal {cm(WEG_AFSTAND_MIN_M)} (indicatief)."
+        melding("weg_afstand", "fout", tekst)
+    if terrein_op(bovengrond, leiding.u) == "prive":
+        melding("terrein", "waarschuwing", "Privéterrein: toestemming van de eigenaar nodig.")
     huis = bovengrond["huis"]
     if raakt_fundering(bovengrond, leiding.u, leiding.diepte, straal):
         melding("huis", "fout", "De leiding raakt de fundering van een huis.")
@@ -272,15 +298,75 @@ def controleer(
     return meldingen, posities
 
 
+def punt_status(punt: ChecklistItem, meldingen: list[Melding]) -> str:
+    """'fout', 'let_op' (alleen waarschuwingen) of 'ok' voor één automatisch getoetst punt."""
+    niveaus = {m.niveau for m in meldingen if m.code in punt.auto}
+    if "fout" in niveaus:
+        return "fout"
+    return "let_op" if "waarschuwing" in niveaus else "ok"
+
+
 def checklist_status(meldingen: list[Melding], heeft_nieuwe_leiding: bool) -> dict[str, str]:
-    """Status van de automatisch getoetste punten: 'open', 'ok' of 'fout'."""
-    status = {}
-    for punt in CHECKLIST:
-        if not punt.auto:
+    """Status van de automatisch getoetste punten: 'open', 'ok', 'let_op' of 'fout'."""
+    return {
+        punt.id: punt_status(punt, meldingen) if heeft_nieuwe_leiding else "open"
+        for punt in CHECKLIST
+        if punt.auto
+    }
+
+
+def afstand_kabels(leiding: Leiding, ander: Leiding, ander_plek: tuple[float, float]) -> dict:
+    """Maatlijn tussen de randen van twee leidingen, langs de lijn tussen hun middens."""
+    du, dd = ander_plek[0] - leiding.u, ander_plek[1] - leiding.diepte
+    afstand = math.hypot(du, dd)
+    richting = (du / afstand, dd / afstand) if afstand else (1.0, 0.0)
+    gat = afstand - leiding.straal - ander.straal
+    return {
+        "soort": "kabel", "leiding_id": leiding.id,
+        "u1": leiding.u + richting[0] * leiding.straal,
+        "d1": leiding.diepte + richting[1] * leiding.straal,
+        "u2": ander_plek[0] - richting[0] * ander.straal,
+        "d2": ander_plek[1] - richting[1] * ander.straal,
+        "afstand": round(max(gat, 0.0), 3), "minimum": AFSTAND_MIN_M, "ok": gat >= AFSTAND_MIN_M,
+    }  # fmt: skip
+
+
+def afstand_weg(bovengrond: dict, leiding: Leiding) -> dict | None:
+    """Horizontale maatlijn naar de rand van het wegprofiel (None als erin of ver weg)."""
+    gat = afstand_tot_weg(bovengrond, leiding)
+    if gat <= 0 or gat > MEET_BEREIK_M:
+        return None
+    weg = bovengrond["weg"]
+    links = leiding.u < weg["teen_l"]
+    kant = 1 if links else -1
+    return {
+        "soort": "weg", "leiding_id": leiding.id,
+        "u1": leiding.u + kant * leiding.straal, "d1": leiding.diepte,
+        "u2": weg["teen_l"] if links else weg["teen_r"], "d2": leiding.diepte,
+        "afstand": round(gat, 3), "minimum": WEG_AFSTAND_MIN_M, "ok": gat >= WEG_AFSTAND_MIN_M,
+    }  # fmt: skip
+
+
+def meetlijnen(
+    bovengrond: dict, leidingen: list[Leiding], posities: dict[str, tuple[float, float]]
+) -> list[dict]:
+    """Voor elke nieuwe leiding: maatlijn naar de dichtstbijzijnde bestaande leiding en de weg."""
+    bestaand = [k for k in leidingen if not k.nieuw]
+    lijnen = []
+    for leiding in leidingen:
+        if not leiding.nieuw:
             continue
-        fout = any(m.code in punt.auto and m.niveau == "fout" for m in meldingen)
-        status[punt.id] = "open" if not heeft_nieuwe_leiding else ("fout" if fout else "ok")
-    return status
+        u, diepte = posities[leiding.id]
+        mijn = leiding.model_copy(update={"u": u, "diepte": diepte})
+        if bestaand:
+            dichtst = min(
+                bestaand,
+                key=lambda k: math.dist(posities[k.id], (mijn.u, mijn.diepte)) - k.straal,
+            )
+            lijnen.append(afstand_kabels(mijn, dichtst, posities[dichtst.id]))
+        if (weg := afstand_weg(bovengrond, mijn)) is not None:
+            lijnen.append(weg)
+    return lijnen
 
 
 def bestaande_leidingen(bovengrond: dict) -> list[Leiding]:

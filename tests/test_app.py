@@ -78,7 +78,7 @@ def test_api_profiel_geeft_lagen_bibliotheek_en_checklist() -> None:
     assert len(inhoud["lagen"]) == 8
     assert inhoud["bibliotheek"]
     assert inhoud["posities"]
-    assert len(inhoud["checklist"]) == 12
+    assert len(inhoud["checklist"]) == 14
 
 
 def test_api_profiel_weigert_te_kort_trace_en_positie_buiten_trace() -> None:

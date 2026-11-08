@@ -19,6 +19,7 @@ const staat = {
   bestaand: [],
   nieuwe: [],
   posities: {},
+  afstanden: [],
   meldingen: [],
   checkstatus: {},
   gereed: {},
@@ -781,6 +782,68 @@ function tekenSpook(ctx) {
   ctx.setLineDash([]);
 }
 
+function pil(ctx, tekst, x, y, kleur) {
+  ctx.font = "11px 'Segoe UI', system-ui, sans-serif";
+  const breedte = ctx.measureText(tekst).width + 10;
+  ctx.fillStyle = "rgba(14, 18, 22, 0.92)";
+  ctx.fillRect(x - breedte / 2, y - 9, breedte, 18);
+  ctx.strokeStyle = kleur;
+  ctx.lineWidth = 1;
+  ctx.strokeRect(x - breedte / 2 + 0.5, y - 8.5, breedte - 1, 17);
+  ctx.fillStyle = "#eee6d9";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(tekst, x, y);
+}
+
+function tekenTerrein(ctx, g) {
+  const x = zx(g.perceel.grens);
+  const horizon = zy(0);
+  ctx.save();
+  ctx.setLineDash([6, 4]);
+  ctx.strokeStyle = "rgba(229, 221, 199, 0.55)";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(x, 0);
+  ctx.lineTo(x, zicht.h);
+  ctx.stroke();
+  ctx.restore();
+  ctx.fillStyle = "#c98f3a";
+  ctx.fillRect(0, horizon - 2, x, 3);
+  ctx.fillStyle = "#6ea0b5";
+  ctx.fillRect(x, horizon - 2, zicht.w - x, 3);
+  pil(ctx, "Privé", Math.min(x - 40, 60), horizon - 24, "#c98f3a");
+  pil(ctx, "Openbaar", Math.max(x + 44, 60), horizon - 24, "#6ea0b5");
+  pil(ctx, "perceelgrens", x, 62, "rgba(229, 221, 199, 0.5)");
+}
+
+function tekenMaatlijn(ctx, lijn) {
+  const kleur = lijn.ok ? "#7fb069" : "#d9534f";
+  const [x1, y1, x2, y2] = [zx(lijn.u1), zy(lijn.d1), zx(lijn.u2), zy(lijn.d2)];
+  ctx.strokeStyle = kleur;
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(x1, y1);
+  ctx.lineTo(x2, y2);
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  const lengte = Math.hypot(dx, dy) || 1;
+  const [nx, ny] = [(-dy / lengte) * 5, (dx / lengte) * 5];
+  for (const [x, y] of [[x1, y1], [x2, y2]]) {
+    ctx.moveTo(x - nx, y - ny);
+    ctx.lineTo(x + nx, y + ny);
+  }
+  ctx.stroke();
+  const cm = Math.round(lijn.afstand * 100);
+  const tekst = `${cm} cm${lijn.ok ? "" : ` (min. ${Math.round(lijn.minimum * 100)})`}`;
+  const versprong = lijn.soort === "weg" ? 20 : -16;
+  pil(ctx, tekst, (x1 + x2) / 2, (y1 + y2) / 2 + versprong, kleur);
+}
+
+function tekenMaatlijnen(ctx) {
+  for (const lijn of staat.afstanden) tekenMaatlijn(ctx, lijn);
+}
+
 function tekenZicht() {
   const { ctx, w, h } = maatCanvas($("zicht"));
   zicht.w = w;
@@ -796,6 +859,7 @@ function tekenZicht() {
   tekenLagen(ctx, p);
   tekenSloot(ctx, p.bovengrond.sloot);
   tekenBovengrond(ctx, p.bovengrond);
+  tekenTerrein(ctx, p.bovengrond);
   ctx.strokeStyle = "rgba(238, 230, 217, 0.5)";
   ctx.lineWidth = 1;
   ctx.beginPath();
@@ -803,6 +867,7 @@ function tekenZicht() {
   ctx.lineTo(w, zy(0));
   ctx.stroke();
   for (const leiding of tekenvolgorde()) tekenLeiding(ctx, leiding);
+  tekenMaatlijnen(ctx);
   tekenSpook(ctx);
   tekenLinialen(ctx);
 }
@@ -835,6 +900,7 @@ async function controleer() {
     staat.meldingen = antwoord.meldingen;
     staat.posities = antwoord.posities;
     staat.checkstatus = antwoord.checklist;
+    staat.afstanden = antwoord.afstanden;
   } catch (fout) {
     toon(fout.message);
   }
@@ -876,7 +942,12 @@ function toonChecklist() {
       const status = staat.checkstatus[punt.id] ?? "open";
       const stip = document.createElement("span");
       stip.className = `stip ${status}`;
-      stip.title = { open: "Nog niet getoetst", ok: "Voldoet", fout: "Voldoet niet" }[status];
+      stip.title = {
+        open: "Nog niet getoetst",
+        ok: "Voldoet",
+        let_op: "Let op",
+        fout: "Voldoet niet",
+      }[status];
       item.append(stip, tekst);
       if (status === "ok") klaar++;
     } else {
