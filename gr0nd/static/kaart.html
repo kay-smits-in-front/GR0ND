@@ -8,8 +8,12 @@
     <link rel="stylesheet" href="/static/vendor/maplibre-gl.css" />
     <link rel="stylesheet" href="/static/kaart.css" />
     <script src="/static/vendor/maplibre-gl.js" defer></script>
+    <script type="importmap">
+      { "imports": { "three": "/static/vendor/three.module.min.js", "three/addons/": "/static/vendor/" } }
+    </script>
     <script src="/static/penseel.js" defer></script>
     <script src="/static/kaart.js" defer></script>
+    <script type="module" src="/static/blok.js"></script>
   </head>
   <body class="app">
     <header class="balk">
@@ -17,6 +21,7 @@
       <nav class="tabs" aria-label="Weergave">
         <button id="tab-overzicht" type="button" aria-pressed="true">Overzicht</button>
         <button id="tab-zicht" type="button" aria-pressed="false" disabled>0-zicht</button>
+        <button id="tab-blok" type="button" aria-pressed="false" disabled title="Teken eerst een gebied">3D-blok</button>
       </nav>
 
       <nav id="paneel-overzicht" class="menus" aria-label="Menu overzicht">
@@ -110,6 +115,7 @@
           <input id="zoek-invoer" type="search" placeholder="Zoek adres, plaats of postcode" />
           <ul id="zoek-lijst" class="zoek-lijst" hidden></ul>
         </form>
+        <div id="blok" class="blok" aria-label="3D-blok van het gebied" hidden></div>
         <canvas id="zicht" aria-label="0-zicht: doorsnede loodrecht op het tracé" hidden></canvas>
         <div id="meldingen" class="meldingen" aria-live="polite"></div>
         <div id="toasts" class="toasts" aria-live="assertive"></div>

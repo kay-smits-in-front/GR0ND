@@ -228,6 +228,7 @@ function gebiedBijwerken() {
     features.push({ type: "Feature", properties: {}, geometry: geometrie });
   }
   kaartObj.getSource("gebied").setData({ type: "FeatureCollection", features });
+  $("tab-blok").disabled = !gebied.klaar;
   const info = $("gebied-info");
   if (gebied.klaar) info.textContent = `Gebied van ${toonOppervlak(oppervlakM2(p))}, ${p.length} hoekpunten.`;
   else if (gebied.tekenen) info.textContent = `${p.length} punten. Dubbelklik om af te ronden.`;
@@ -1369,21 +1370,57 @@ async function openZicht() {
 function zetWeergave(naam) {
   staat.weergave = naam;
   stopWandelen();
+  if (naam !== "blok") blokWeergave?.stop();
   const zichtActief = naam === "zicht";
-  $("kaart").hidden = zichtActief;
-  $("zoek-form").hidden = zichtActief;
+  const blokActief = naam === "blok";
+  const overzichtActief = naam === "overzicht";
+  $("kaart").hidden = !overzichtActief;
+  $("zoek-form").hidden = !overzichtActief;
   $("zicht").hidden = !zichtActief;
-  $("paneel-overzicht").hidden = zichtActief;
+  $("blok").hidden = !blokActief;
+  $("paneel-overzicht").hidden = !overzichtActief;
   $("paneel-zicht").hidden = !zichtActief;
   $("positie").hidden = !zichtActief;
-  $("tab-overzicht").setAttribute("aria-pressed", !zichtActief);
+  $("tab-overzicht").setAttribute("aria-pressed", overzichtActief);
   $("tab-zicht").setAttribute("aria-pressed", zichtActief);
+  $("tab-blok").setAttribute("aria-pressed", blokActief);
   $("status").textContent = "";
   $("meldingen").replaceChildren();
   $("vlak").classList.remove("fout");
-  if (!zichtActief) {
+  if (overzichtActief) {
     $("balk-info").textContent = OVERZICHT_INFO;
     kaartObj?.resize();
+  }
+}
+
+let blokWeergave = null;
+
+function wachtOpBlokModule() {
+  if (window.BlokWeergave) return Promise.resolve();
+  return new Promise((klaar) => window.addEventListener("blok-gereed", klaar, { once: true }));
+}
+
+async function gebiedInRd() {
+  const paren = gebied.punten.map(([lon, lat]) => `${lon},${lat}`).join(";");
+  const { punten } = await api(`/api/rd?punten=${encodeURIComponent(paren)}`);
+  const xs = punten.map((p) => p[0]);
+  const ys = punten.map((p) => p[1]);
+  return [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
+}
+
+async function openBlok() {
+  if (!gebied.klaar) return toon("Teken eerst een gebied.");
+  try {
+    await wachtOpBlokModule();
+    const [x0, y0, x1, y1] = await gebiedInRd();
+    const data = await api(`/api/blok?x0=${x0}&y0=${y0}&x1=${x1}&y1=${y1}&n=64`);
+    zetWeergave("blok");
+    blokWeergave ??= new window.BlokWeergave($("blok"));
+    const schaal = blokWeergave.toon(data);
+    const over = schaal > 1.05 ? ` Hoogte ${nl(schaal, 0)}× overdreven.` : "";
+    $("balk-info").textContent = `3D-blok van het gebied, 50 m diep. Draai met slepen, zoom met scrollen.${over} Voorbeelddata.`;
+  } catch (fout) {
+    toon(fout.message);
   }
 }
 
@@ -1393,6 +1430,7 @@ async function start() {
   bindZicht();
   $("tab-overzicht").addEventListener("click", () => zetWeergave("overzicht"));
   $("tab-zicht").addEventListener("click", openZicht);
+  $("tab-blok").addEventListener("click", openBlok);
   new ResizeObserver(() => (staat.weergave === "zicht" ? tekenZicht() : kaartObj?.resize())).observe($("vlak"));
   $("balk-info").textContent = OVERZICHT_INFO;
   try {

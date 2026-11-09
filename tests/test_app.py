@@ -173,3 +173,23 @@ def test_api_profiel_en_controle_werken_met_een_bocht() -> None:
     assert profiel["trace"]["azimut"] == 90
     assert profiel["trace"]["knikken"] == [300.0]
     assert antwoord.status_code == 200
+
+
+def test_blok_geeft_bodemlagen_en_weigert_een_te_groot_gebied() -> None:
+    client = TestClient(maak_app(DEMO))
+    gebied = {"x0": 120000, "y0": 485000, "x1": 124000, "y1": 489000, "n": 16}
+
+    antwoord = client.get("/api/blok", params=gebied)
+    assert antwoord.status_code == 200
+    assert len(antwoord.json()["onderkant"][0]) == 16 * 16
+
+    assert client.get("/api/blok", params=gebied | {"x1": 200000}).status_code == 400
+
+
+def test_blok_vraagt_inloggen_buiten_demo() -> None:
+    gebied = {"x0": 0, "y0": 0, "x1": 100, "y1": 100}
+
+    assert (
+        TestClient(maak_app(Settings(omgeving="test"))).get("/api/blok", params=gebied).status_code
+        == 401
+    )

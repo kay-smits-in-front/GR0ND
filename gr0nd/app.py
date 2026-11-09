@@ -211,6 +211,14 @@ def maak_app(settings: Settings | None = None) -> FastAPI:
         lon, lat = kaart.rd_naar_wgs84(x, y)
         return {"lon": lon, "lat": lat}
 
+    @app.get("/api/blok")
+    def blok(_: Ingelogd, x0: float, y0: float, x1: float, y1: float, n: int = 48) -> dict:
+        """Bodemlagen van een gebied voor het 3D-blok (voorbeelddata)."""
+        try:
+            return kaart.blok(x0, y0, x1, y1, n)
+        except ValueError as fout:
+            raise HTTPException(status_code=400, detail=str(fout)) from fout
+
     @app.get("/api/profiel")
     def profiel(_: Ingelogd, punten: str, s: float = 0.0) -> dict:
         """Het 0-zicht met de bibliotheek, bestaande leidingen en de checklist."""

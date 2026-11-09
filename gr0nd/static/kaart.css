@@ -607,3 +607,15 @@ select {
   display: grid;
   gap: 6px;
 }
+
+/* 3D-blok */
+.blok {
+  position: absolute;
+  inset: 0;
+}
+
+.blok canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}

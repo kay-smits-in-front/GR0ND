@@ -196,6 +196,38 @@ def laagdikten(x: np.ndarray, y: np.ndarray) -> np.ndarray:
     return dikten
 
 
+BLOK_MAX_M = 15_000.0  # grootste zijde van een gebied dat als blok wordt opgevraagd
+BLOK_RASTER = (8, 96)  # kleinste en grootste aantal rasterpunten per zijde
+
+
+def blok(x0: float, y0: float, x1: float, y1: float, n: int = 48) -> dict:
+    """Bodemlagen van een gebied (RD, meters) op een raster van n × n punten, voor het 3D-blok.
+
+    `onderkant[i]` is de diepte van de onderkant van laag i onder maaiveld, rij voor rij van
+    zuid naar noord en binnen een rij van west naar oost. Voorbeelddata, zoals de rest van de grond.
+    """
+    if not (x1 > x0 and y1 > y0):
+        raise ValueError("Het gebied moet een positieve breedte en hoogte hebben.")
+    if max(x1 - x0, y1 - y0) > BLOK_MAX_M:
+        raise ValueError(f"Het gebied is te groot (maximaal {BLOK_MAX_M / 1000:.0f} km per zijde).")
+    if not BLOK_RASTER[0] <= n <= BLOK_RASTER[1]:
+        raise ValueError(
+            f"Het raster moet tussen {BLOK_RASTER[0]} en {BLOK_RASTER[1]} punten zijn."
+        )
+    x, y = np.meshgrid(np.linspace(x0, x1, n), np.linspace(y0, y1, n))
+    onder = np.cumsum(laagdikten(x, y), axis=-1)
+    onder[..., -1] = DIEPTE_M
+    return {
+        "bron": "voorbeelddata",
+        "crs": "EPSG:28992",
+        "gebied": [x0, y0, x1, y1],
+        "n": n,
+        "diepte": DIEPTE_M,
+        "lagen": [{"id": laag.id, "naam": laag.naam, "kleur": laag.kleur} for laag in LAGEN],
+        "onderkant": [onder[..., i].round(2).ravel().tolist() for i in range(len(LAGEN))],
+    }
+
+
 def voorbeeld_bovengrond(seed: int) -> dict:
     """Voorbeeld-dwarsprofiel: huis, sloot, weg op een berm en een lantaarnpaal.
 
@@ -212,16 +244,27 @@ def voorbeeld_bovengrond(seed: int) -> dict:
     huis_eind = round(huis_begin + 9.0, 2)
     sloot_links = round(-3.0 + verschuiving - 2.0, 2)
     huis = {
-        "u0": huis_begin, "u1": huis_eind, "goot": 5.5, "nok": 9.5,
-        "fundering_diepte": 0.8, "fundering_breedte": 0.5,
+        "u0": huis_begin,
+        "u1": huis_eind,
+        "goot": 5.5,
+        "nok": 9.5,
+        "fundering_diepte": 0.8,
+        "fundering_breedte": 0.5,
     }
     sloot = {
-        "u_midden": round(-3.0 + verschuiving, 2), "breedte_boven": 4.0,
-        "breedte_bodem": 1.5, "diepte": sloot_diepte, "waterpeil": 0.4,
+        "u_midden": round(-3.0 + verschuiving, 2),
+        "breedte_boven": 4.0,
+        "breedte_bodem": 1.5,
+        "diepte": sloot_diepte,
+        "waterpeil": 0.4,
     }
     weg = {
-        "teen_l": teen_links, "kruin0": kruin_begin, "kruin1": kruin_eind,
-        "teen_r": round(kruin_eind + berm * 3, 2), "hoogte": berm, "asfalt": 0.2,
+        "teen_l": teen_links,
+        "kruin0": kruin_begin,
+        "kruin1": kruin_eind,
+        "teen_r": round(kruin_eind + berm * 3, 2),
+        "hoogte": berm,
+        "asfalt": 0.2,
     }
     return {
         "bron": "voorbeelddata",
