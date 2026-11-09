@@ -42,11 +42,11 @@ class LaagType:
 LAGEN = (
     LaagType("toplaag", "Humeuze toplaag (bouwvoor)", "#4a3626"),
     LaagType("loess", "Löss", "#c9a972"),
-    LaagType("klei", "Klei", "#8a7d68"),
+    LaagType("klei", "Klei", "#a0714d"),
     LaagType("veen", "Veen", "#3b2a1c"),
-    LaagType("siltige_klei", "Siltige klei", "#7d8478"),
+    LaagType("siltige_klei", "Siltige klei", "#8f8a64"),
     LaagType("fijn_zand", "Fijn zand (dekzand)", "#d9c48a"),
-    LaagType("keileem", "Keileem", "#8f7f6b"),
+    LaagType("keileem", "Keileem", "#94775a"),
     LaagType("grof_zand", "Grof zand en grind", "#c98f4e"),
 )
 

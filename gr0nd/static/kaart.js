@@ -7,7 +7,6 @@ const $ = (id) => document.getElementById(id);
 
 const DIEPTE_M = 50;
 const OVERZICHT_INFO = "Kantelen en draaien: sleep met de rechtermuisknop. Grond en leidingen in het 0-zicht zijn voorbeelddata.";
-const SKY_ONDER = "#1a1f22";
 
 const staat = {
   weergave: "overzicht",
@@ -556,7 +555,7 @@ function tekenLagen(ctx, p) {
   const us = [-500, ...Array.from({ length: aantal }, (_, i) => v.u_min + i * v.stap), 500];
   const uitbreiden = (waarden) => [waarden[0], ...waarden, waarden[waarden.length - 1]];
   let boven = us.map(() => 0);
-  for (const laag of p.lagen) {
+  for (const [laagIndex, laag] of p.lagen.entries()) {
     const onder = uitbreiden(laag.onderkant);
     if (onder.some((d, i) => d - boven[i] > 0.001)) {
       ctx.beginPath();
@@ -565,24 +564,19 @@ function tekenLagen(ctx, p) {
       ctx.closePath();
       ctx.fillStyle = laag.kleur;
       ctx.fill();
+      penseelKorrel(ctx, laagIndex);
     }
     laag.pad = onder;
     boven = onder;
   }
   const verloop = ctx.createLinearGradient(0, zy(0), 0, zy(DIEPTE_M));
   verloop.addColorStop(0, "rgba(0,0,0,0)");
-  verloop.addColorStop(1, "rgba(0,0,0,0.62)");
+  verloop.addColorStop(1, "rgba(0,0,0,0.5)");
   ctx.fillStyle = verloop;
   ctx.fillRect(0, zy(0), zicht.w, DIEPTE_M * zicht.pm);
   ctx.fillStyle = "rgba(70, 110, 140, 0.24)";
   ctx.fillRect(0, zy(p.grondwater), zicht.w, (DIEPTE_M - p.grondwater) * zicht.pm);
-  ctx.strokeStyle = "rgba(0,0,0,0.35)";
-  ctx.lineWidth = 1;
-  for (const laag of p.lagen.slice(0, -1)) {
-    ctx.beginPath();
-    us.forEach((u, i) => (i ? ctx.lineTo(zx(u), zy(laag.pad[i])) : ctx.moveTo(zx(u), zy(laag.pad[i]))));
-    ctx.stroke();
-  }
+  for (const laag of p.lagen.slice(0, -1)) penseelLaaggrens(ctx, us, laag.pad);
   tekenLaaglabels(ctx, p, us);
   ctx.setLineDash([6, 4]);
   ctx.strokeStyle = "rgba(140, 190, 230, 0.85)";
@@ -625,7 +619,7 @@ function tekenSloot(ctx, sloot) {
   ctx.lineTo(zx(m + bo), zy(sloot.diepte));
   ctx.lineTo(zx(m + bb), zy(0));
   ctx.closePath();
-  ctx.fillStyle = SKY_ONDER;
+  ctx.fillStyle = "#2b2118";
   ctx.fill();
   const water = trapezium(sloot.waterpeil);
   ctx.save();
@@ -635,7 +629,10 @@ function tekenSloot(ctx, sloot) {
   ctx.lineTo(zx(m + bo), zy(sloot.diepte));
   ctx.lineTo(zx(m + water), zy(sloot.waterpeil));
   ctx.closePath();
-  ctx.fillStyle = "rgba(70, 120, 160, 0.85)";
+  const diep = ctx.createLinearGradient(0, zy(sloot.waterpeil), 0, zy(sloot.diepte));
+  diep.addColorStop(0, "rgba(96, 156, 186, 0.92)");
+  diep.addColorStop(1, "rgba(38, 86, 120, 0.95)");
+  ctx.fillStyle = diep;
   ctx.fill();
   ctx.clip();
   ctx.strokeStyle = "rgba(200, 225, 245, 0.55)";
@@ -660,7 +657,14 @@ function tekenWeg(ctx, weg) {
   ctx.fillStyle = "#6a5844";
   ctx.fill();
   ctx.fillStyle = "#26272a";
-  ctx.fillRect(zx(weg.kruin0), horizon - (weg.hoogte + weg.asfalt) * zicht.pm, (weg.kruin1 - weg.kruin0) * zicht.pm, weg.asfalt * zicht.pm);
+  const top = horizon - (weg.hoogte + weg.asfalt) * zicht.pm;
+  ctx.fillRect(zx(weg.kruin0), top, (weg.kruin1 - weg.kruin0) * zicht.pm, Math.max(3, weg.asfalt * zicht.pm));
+  ctx.fillStyle = "rgba(255, 238, 200, 0.28)";
+  ctx.fillRect(zx(weg.kruin0), top, (weg.kruin1 - weg.kruin0) * zicht.pm, 1.5);
+  ctx.fillStyle = "#cfc8b0";
+  for (let u = weg.kruin0 + 0.6; u < weg.kruin1 - 0.6; u += 1.8) {
+    ctx.fillRect(zx(u), top + 0.5, 0.9 * zicht.pm, 1.5);
+  }
 }
 
 function wegtopOp(wegen, u) {
@@ -680,24 +684,52 @@ function tekenLantaarn(ctx, lantaarn, wegtop) {
 
 function tekenHuis(ctx, huis) {
   const horizon = zy(0);
+  const pm = zicht.pm;
+  const [x0, x1] = [zx(huis.u0), zx(huis.u1)];
+  penseelSchaduw(ctx, (x0 + x1) / 2, horizon + 2, (x1 - x0) * 1.15);
   ctx.fillStyle = "#9a9a94";
   for (const gevel of [huis.u0, huis.u1]) {
-    ctx.fillRect(zx(gevel - huis.fundering_breedte / 2), horizon, huis.fundering_breedte * zicht.pm, huis.fundering_diepte * zicht.pm);
+    ctx.fillRect(zx(gevel - huis.fundering_breedte / 2), horizon, huis.fundering_breedte * pm, huis.fundering_diepte * pm);
   }
-  const breedte = (huis.u1 - huis.u0) * zicht.pm;
-  ctx.fillStyle = "#7a5a48";
-  ctx.fillRect(zx(huis.u0), horizon - huis.goot * zicht.pm, breedte, huis.goot * zicht.pm);
+  const muur = ctx.createLinearGradient(x0, 0, x1, 0);
+  muur.addColorStop(0, "#a8705a");
+  muur.addColorStop(1, "#7d4f40");
+  ctx.fillStyle = muur;
+  ctx.fillRect(x0, horizon - huis.goot * pm, x1 - x0, huis.goot * pm);
+  ctx.strokeStyle = "rgba(0,0,0,0.12)";
+  ctx.lineWidth = 1;
   ctx.beginPath();
-  ctx.moveTo(zx(huis.u0 - 0.4), horizon - huis.goot * zicht.pm);
-  ctx.lineTo(zx((huis.u0 + huis.u1) / 2), horizon - huis.nok * zicht.pm);
-  ctx.lineTo(zx(huis.u1 + 0.4), horizon - huis.goot * zicht.pm);
+  for (let d = 0.3; d < huis.goot; d += 0.3) {
+    ctx.moveTo(x0, horizon - d * pm);
+    ctx.lineTo(x1, horizon - d * pm);
+  }
+  ctx.stroke();
+  const nok = [(x0 + x1) / 2, horizon - huis.nok * pm];
+  ctx.beginPath();
+  ctx.moveTo(x0 - 0.4 * pm, horizon - huis.goot * pm);
+  ctx.lineTo(nok[0], nok[1]);
+  ctx.lineTo(x1 + 0.4 * pm, horizon - huis.goot * pm);
   ctx.closePath();
-  ctx.fillStyle = "#3b3532";
+  ctx.fillStyle = "#4a3b3a";
   ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(nok[0], nok[1]);
+  ctx.lineTo(x1 + 0.4 * pm, horizon - huis.goot * pm);
+  ctx.lineTo(nok[0], horizon - huis.goot * pm);
+  ctx.closePath();
+  ctx.fillStyle = "#6a4e48";
+  ctx.fill();
+  ctx.fillStyle = "#3a2e2e";
+  ctx.fillRect(x1 - 1.8 * pm, nok[1] - 0.4 * pm, 0.7 * pm, (huis.nok - huis.goot) * pm * 0.6 + 0.4 * pm);
   if (huis.u1 - huis.u0 < 5) return;
-  ctx.fillStyle = "#c9d2d8";
+  ctx.fillStyle = "#5a3a2c";
+  ctx.fillRect(zx((huis.u0 + huis.u1) / 2 - 0.5), horizon - 2.1 * pm, 1.0 * pm, 2.1 * pm);
   for (const [u, onder] of [[huis.u0 + 1.2, 1.0], [huis.u1 - 2.4, 1.0], [huis.u0 + 1.2, 3.4], [huis.u1 - 2.4, 3.4]]) {
-    ctx.fillRect(zx(u), horizon - (onder + 1.3) * zicht.pm, 1.2 * zicht.pm, 1.3 * zicht.pm);
+    ctx.fillStyle = "#e8d9a8";
+    ctx.fillRect(zx(u), horizon - (onder + 1.3) * pm, 1.2 * pm, 1.3 * pm);
+    ctx.strokeStyle = "#e8e0d0";
+    ctx.lineWidth = Math.max(1, 0.08 * pm);
+    ctx.strokeRect(zx(u), horizon - (onder + 1.3) * pm, 1.2 * pm, 1.3 * pm);
   }
 }
 
@@ -904,12 +936,11 @@ function tekenZicht() {
   const p = staat.profiel;
   if (!p) return;
   beperkZicht();
-  const lucht = ctx.createLinearGradient(0, 0, 0, Math.max(zy(0), 1));
-  lucht.addColorStop(0, "#0e1216");
-  lucht.addColorStop(1, SKY_ONDER);
-  ctx.fillStyle = lucht;
-  ctx.fillRect(0, 0, w, h);
+  tekenHemel(ctx);
+  tekenHeuvels(ctx);
   tekenLagen(ctx, p);
+  penseelGras(ctx, p.bovengrond);
+  penseelBomen(ctx, p.bovengrond, Math.floor(p.trace.s / 100));
   p.bovengrond.sloten.forEach((sloot) => tekenSloot(ctx, sloot));
   tekenBovengrond(ctx, p.bovengrond);
   tekenTerrein(ctx, p.bovengrond);
