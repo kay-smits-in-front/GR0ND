@@ -211,20 +211,25 @@ def voorbeeld_bovengrond(seed: int) -> dict:
     huis_begin = round(-22.0 + verschuiving, 2)
     huis_eind = round(huis_begin + 9.0, 2)
     sloot_links = round(-3.0 + verschuiving - 2.0, 2)
+    huis = {
+        "u0": huis_begin, "u1": huis_eind, "goot": 5.5, "nok": 9.5,
+        "fundering_diepte": 0.8, "fundering_breedte": 0.5,
+    }
+    sloot = {
+        "u_midden": round(-3.0 + verschuiving, 2), "breedte_boven": 4.0,
+        "breedte_bodem": 1.5, "diepte": sloot_diepte, "waterpeil": 0.4,
+    }
+    weg = {
+        "teen_l": teen_links, "kruin0": kruin_begin, "kruin1": kruin_eind,
+        "teen_r": round(kruin_eind + berm * 3, 2), "hoogte": berm, "asfalt": 0.2,
+    }
     return {
-        "huis": {
-            "u0": huis_begin, "u1": round(huis_begin + 9.0, 2), "goot": 5.5, "nok": 9.5,
-            "fundering_diepte": 0.8, "fundering_breedte": 0.5,
-        },
-        "sloot": {
-            "u_midden": round(-3.0 + verschuiving, 2), "breedte_boven": 4.0,
-            "breedte_bodem": 1.5, "diepte": sloot_diepte, "waterpeil": 0.4,
-        },
-        "weg": {
-            "teen_l": teen_links, "kruin0": kruin_begin, "kruin1": kruin_eind,
-            "teen_r": round(kruin_eind + berm * 3, 2), "hoogte": berm, "asfalt": 0.2,
-        },
-        "lantaarn": {"u": round(kruin_eind - 0.8, 2), "hoogte": 5.0},
+        "bron": "voorbeelddata",
+        "huizen": [huis],
+        "sloten": [sloot],
+        "wegen": [weg],
+        "lantaarns": [{"u": round(kruin_eind - 0.8, 2), "hoogte": 5.0}],
+        "terreinen": [],
         # Perceelgrens: links is privéterrein (kavel van het huis), rechts openbaar.
         "perceel": {"grens": round((huis_eind + sloot_links) / 2, 2)},
     }  # fmt: skip
@@ -309,7 +314,7 @@ class KaartLaag:
     id: str
     naam: str
     groep: str  # "achtergrond" (kies er één) of "laag" (aan en uit)
-    tegels: str  # tegel-URL voor MapLibre; pdok:// betekent: tegelmatrix met nul opvullen
+    tegels: str  # tegel-URL voor MapLibre; pdok:// loopt via onze eigen tegelhandler
     bron: str
     standaard: bool = False
     max_zoom: int = 19
@@ -333,7 +338,7 @@ def wms_tegels(pad: str, lagen: str) -> str:
         f"service=WMS&version=1.3.0&request=GetMap&layers={lagen}&styles=&format=image/png"
         "&transparent=true&crs=EPSG:3857&width=256&height=256&bbox={bbox-epsg-3857}"
     )
-    return f"https://{PDOK}{pad}?{vraag}"
+    return f"pdok://{PDOK}{pad}?{vraag}"
 
 
 KAARTLAGEN = (

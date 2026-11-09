@@ -595,3 +595,15 @@ select {
   border-color: var(--lijn);
   color: var(--lijn);
 }
+
+.bron-stip {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+}
+
+#projectdata {
+  display: grid;
+  gap: 6px;
+}

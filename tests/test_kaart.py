@@ -103,7 +103,7 @@ def test_dwarsprofiel_buiten_het_trace_geeft_fout(s) -> None:
 def test_bovengrond_heeft_logische_volgorde_voor_veel_seeds() -> None:
     for seed in range(200):
         grond = voorbeeld_bovengrond(seed)
-        huis, sloot, weg = grond["huis"], grond["sloot"], grond["weg"]
+        huis, sloot, weg = grond["huizen"][0], grond["sloten"][0], grond["wegen"][0]
 
         assert huis["u0"] < huis["u1"] < sloot["u_midden"] - sloot["breedte_boven"] / 2
         assert sloot["u_midden"] + sloot["breedte_boven"] / 2 < weg["teen_l"]
