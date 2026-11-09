@@ -1542,6 +1542,7 @@ async function laadProjecten() {
 }
 
 function toonProjecten() {
+  kmlKnopBijwerken();
   const zichtbaar = projecten.open ? [] : projecten.lijst;
   kaartObj.getSource("projecten").setData({ type: "FeatureCollection", features: projectFeatures(zichtbaar) });
   const lijst = $("project-lijst");
@@ -1643,6 +1644,12 @@ async function openProject(p) {
   await herstelTrace(p.trace);
   toonProjecten();
   laadProjectdata(false);
+}
+
+function kmlKnopBijwerken() {
+  const knop = $("exporteer-kml");
+  knop.hidden = !projecten.open;
+  if (projecten.open) knop.href = `/api/projecten/${projecten.open.id}/kml`;
 }
 
 function sluitProject() {
