@@ -649,9 +649,8 @@ function tekenSloot(ctx, sloot) {
   ctx.restore();
 }
 
-function tekenBovengrond(ctx, g) {
+function tekenWeg(ctx, weg) {
   const horizon = zy(0);
-  const { weg, huis, lantaarn } = g;
   ctx.beginPath();
   ctx.moveTo(zx(weg.teen_l), horizon);
   ctx.lineTo(zx(weg.kruin0), horizon - weg.hoogte * zicht.pm);
@@ -662,13 +661,25 @@ function tekenBovengrond(ctx, g) {
   ctx.fill();
   ctx.fillStyle = "#26272a";
   ctx.fillRect(zx(weg.kruin0), horizon - (weg.hoogte + weg.asfalt) * zicht.pm, (weg.kruin1 - weg.kruin0) * zicht.pm, weg.asfalt * zicht.pm);
-  const wegtop = weg.hoogte + weg.asfalt;
-  ctx.fillStyle = "#2a2c30";
-  ctx.fillRect(zx(lantaarn.u) - 0.06 * zicht.pm, horizon - (wegtop + lantaarn.hoogte) * zicht.pm, 0.12 * zicht.pm, lantaarn.hoogte * zicht.pm);
-  ctx.fillRect(zx(lantaarn.u) - 1.1 * zicht.pm, horizon - (wegtop + lantaarn.hoogte) * zicht.pm, 1.2 * zicht.pm, 0.1 * zicht.pm);
-  ctx.fillStyle = "#e8d9a8";
-  ctx.fillRect(zx(lantaarn.u) - 1.1 * zicht.pm, horizon - (wegtop + lantaarn.hoogte - 0.1) * zicht.pm, 0.5 * zicht.pm, 0.1 * zicht.pm);
+}
 
+function wegtopOp(wegen, u) {
+  const weg = wegen.find((w) => w.kruin0 <= u && u <= w.kruin1);
+  return weg ? weg.hoogte + weg.asfalt : 0;
+}
+
+function tekenLantaarn(ctx, lantaarn, wegtop) {
+  const horizon = zy(0);
+  const boven = horizon - (wegtop + lantaarn.hoogte) * zicht.pm;
+  ctx.fillStyle = "#2a2c30";
+  ctx.fillRect(zx(lantaarn.u) - 0.06 * zicht.pm, boven, 0.12 * zicht.pm, lantaarn.hoogte * zicht.pm);
+  ctx.fillRect(zx(lantaarn.u) - 1.1 * zicht.pm, boven, 1.2 * zicht.pm, 0.1 * zicht.pm);
+  ctx.fillStyle = "#e8d9a8";
+  ctx.fillRect(zx(lantaarn.u) - 1.1 * zicht.pm, boven + 0.1 * zicht.pm, 0.5 * zicht.pm, 0.1 * zicht.pm);
+}
+
+function tekenHuis(ctx, huis) {
+  const horizon = zy(0);
   ctx.fillStyle = "#9a9a94";
   for (const gevel of [huis.u0, huis.u1]) {
     ctx.fillRect(zx(gevel - huis.fundering_breedte / 2), horizon, huis.fundering_breedte * zicht.pm, huis.fundering_diepte * zicht.pm);
@@ -683,10 +694,17 @@ function tekenBovengrond(ctx, g) {
   ctx.closePath();
   ctx.fillStyle = "#3b3532";
   ctx.fill();
+  if (huis.u1 - huis.u0 < 5) return;
   ctx.fillStyle = "#c9d2d8";
-  for (const [u, onder, hoogte] of [[huis.u0 + 1.2, 1.0, 1.3], [huis.u1 - 2.4, 1.0, 1.3], [huis.u0 + 1.2, 3.4, 1.3], [huis.u1 - 2.4, 3.4, 1.3]]) {
-    ctx.fillRect(zx(u), horizon - (onder + hoogte) * zicht.pm, 1.2 * zicht.pm, hoogte * zicht.pm);
+  for (const [u, onder] of [[huis.u0 + 1.2, 1.0], [huis.u1 - 2.4, 1.0], [huis.u0 + 1.2, 3.4], [huis.u1 - 2.4, 3.4]]) {
+    ctx.fillRect(zx(u), horizon - (onder + 1.3) * zicht.pm, 1.2 * zicht.pm, 1.3 * zicht.pm);
   }
+}
+
+function tekenBovengrond(ctx, g) {
+  g.wegen.forEach((weg) => tekenWeg(ctx, weg));
+  g.lantaarns.forEach((l) => tekenLantaarn(ctx, l, wegtopOp(g.wegen, l.u)));
+  g.huizen.forEach((huis) => tekenHuis(ctx, huis));
 }
 
 const ADERS = {
@@ -828,8 +846,12 @@ function pil(ctx, tekst, x, y, kleur) {
 }
 
 function tekenTerrein(ctx, g) {
-  const x = zx(g.perceel.grens);
   const horizon = zy(0);
+  if (!g.perceel) {
+    pil(ctx, "Privé/openbaar onbekend", 110, horizon - 24, "rgba(229, 221, 199, 0.5)");
+    return;
+  }
+  const x = zx(g.perceel.grens);
   ctx.save();
   ctx.setLineDash([6, 4]);
   ctx.strokeStyle = "rgba(229, 221, 199, 0.55)";
@@ -888,7 +910,7 @@ function tekenZicht() {
   ctx.fillStyle = lucht;
   ctx.fillRect(0, 0, w, h);
   tekenLagen(ctx, p);
-  tekenSloot(ctx, p.bovengrond.sloot);
+  p.bovengrond.sloten.forEach((sloot) => tekenSloot(ctx, sloot));
   tekenBovengrond(ctx, p.bovengrond);
   tekenTerrein(ctx, p.bovengrond);
   ctx.strokeStyle = "rgba(238, 230, 217, 0.5)";

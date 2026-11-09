@@ -12,13 +12,15 @@ from gr0nd.ontwerp import (
 )
 
 BOVENGROND = {
-    "huis": {"u0": -22.0, "u1": -13.0, "goot": 5.5, "nok": 9.5,
-             "fundering_diepte": 0.8, "fundering_breedte": 0.5},
-    "sloot": {"u_midden": -3.0, "breedte_boven": 4.0, "breedte_bodem": 1.5,
-              "diepte": 1.0, "waterpeil": 0.4},
-    "weg": {"teen_l": 3.0, "kruin0": 4.5, "kruin1": 11.5, "teen_r": 13.0,
-            "hoogte": 0.5, "asfalt": 0.2},
-    "lantaarn": {"u": 10.7, "hoogte": 5.0},
+    "bron": "voorbeelddata",
+    "huizen": [{"u0": -22.0, "u1": -13.0, "goot": 5.5, "nok": 9.5,
+                "fundering_diepte": 0.8, "fundering_breedte": 0.5}],
+    "sloten": [{"u_midden": -3.0, "breedte_boven": 4.0, "breedte_bodem": 1.5,
+                "diepte": 1.0, "waterpeil": 0.4}],
+    "wegen": [{"teen_l": 3.0, "kruin0": 4.5, "kruin1": 11.5, "teen_r": 13.0,
+               "hoogte": 0.5, "asfalt": 0.2}],
+    "lantaarns": [{"u": 10.7, "hoogte": 5.0}],
+    "terreinen": [],
     "perceel": {"grens": -9.0},
 }  # fmt: skip
 
@@ -181,3 +183,28 @@ def test_meetlijnen_geven_kabel_en_weg_met_afstand_en_oordeel() -> None:
     assert lijnen["weg"]["afstand"] == pytest.approx(1.0 - nieuw.straal)
     assert lijnen["weg"]["ok"] is False
     assert lijnen["kabel"]["afstand"] > 0
+
+
+def test_zonder_perceel_is_het_terrein_onbekend() -> None:
+    zonder = {**BOVENGROND, "perceel": None}
+
+    assert terrein_op(zonder, -20) == "onbekend"
+
+
+def test_zonder_wegen_is_er_geen_wegafstand() -> None:
+    zonder = {**BOVENGROND, "wegen": []}
+    meldingen, _ = controleer(zonder, [nieuwe_kabel(5, 1.2)])
+
+    assert afstand_tot_weg(zonder, nieuwe_kabel(5, 1.2)) == float("inf")
+    assert "weg" not in [m.code for m in meldingen]
+
+
+def test_meerdere_sloten_en_huizen_tellen_allemaal_mee() -> None:
+    tweede_huis = {**BOVENGROND["huizen"][0], "u0": 20.0, "u1": 29.0}
+    tweede_sloot = {**BOVENGROND["sloten"][0], "u_midden": 18.0}
+    grond = {**BOVENGROND, "huizen": [*BOVENGROND["huizen"], tweede_huis],
+             "sloten": [*BOVENGROND["sloten"], tweede_sloot]}  # fmt: skip
+    meldingen, _ = controleer(grond, [nieuwe_kabel(25, 1.2)])
+
+    assert "huis" in [m.code for m in meldingen]
+    assert bestaande_leidingen({**grond, "bron": "bgt"}) == []

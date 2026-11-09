@@ -132,8 +132,11 @@ def cm(meters: float) -> str:
 
 
 def sloot_diepte(bovengrond: dict, u: float) -> float:
-    """Diepte van de slootbodem onder maaiveld op positie u (0 buiten de sloot)."""
-    sloot = bovengrond["sloot"]
+    """Diepte van de slootbodem onder maaiveld op positie u (0 buiten alle sloten)."""
+    return max((diepte_in_sloot(s, u) for s in bovengrond["sloten"]), default=0.0)
+
+
+def diepte_in_sloot(sloot: dict, u: float) -> float:
     afstand = abs(u - sloot["u_midden"])
     half_boven, half_bodem = sloot["breedte_boven"] / 2, sloot["breedte_bodem"] / 2
     if afstand >= half_boven:
@@ -145,29 +148,44 @@ def sloot_diepte(bovengrond: dict, u: float) -> float:
 
 def oppervlak_hoogte(bovengrond: dict, u: float) -> float:
     """Hoogte van het oppervlak boven het maaiveld (berm positief, sloot negatief)."""
-    weg = bovengrond["weg"]
-    if weg["teen_l"] <= u < weg["kruin0"]:
-        return weg["hoogte"] * (u - weg["teen_l"]) / (weg["kruin0"] - weg["teen_l"])
-    if weg["kruin0"] <= u <= weg["kruin1"]:
-        return weg["hoogte"]
-    if weg["kruin1"] < u <= weg["teen_r"]:
-        return weg["hoogte"] * (weg["teen_r"] - u) / (weg["teen_r"] - weg["kruin1"])
+    for weg in bovengrond["wegen"]:
+        if weg["teen_l"] <= u < weg["kruin0"]:
+            return weg["hoogte"] * (u - weg["teen_l"]) / (weg["kruin0"] - weg["teen_l"])
+        if weg["kruin0"] <= u <= weg["kruin1"]:
+            return weg["hoogte"]
+        if weg["kruin1"] < u <= weg["teen_r"]:
+            return weg["hoogte"] * (weg["teen_r"] - u) / (weg["teen_r"] - weg["kruin1"])
     return -sloot_diepte(bovengrond, u)
 
 
 def terrein_op(bovengrond: dict, u: float) -> str:
-    """'prive' links van de perceelgrens, anders 'openbaar'."""
-    return "prive" if u < bovengrond["perceel"]["grens"] else "openbaar"
+    """'prive' links van de perceelgrens, anders 'openbaar'; 'onbekend' zonder perceelgegevens."""
+    perceel = bovengrond.get("perceel")
+    if perceel is None:
+        return "onbekend"
+    return "prive" if u < perceel["grens"] else "openbaar"
 
 
-def afstand_tot_weg(bovengrond: dict, leiding: Leiding) -> float:
-    """Horizontale ruimte van de rand van de leiding tot het wegprofiel (0 als erin of eronder)."""
-    weg = bovengrond["weg"]
+def afstand_tot_een_weg(weg: dict, leiding: Leiding) -> float:
     if weg["teen_l"] <= leiding.u <= weg["teen_r"]:
         return 0.0
     naar_links = weg["teen_l"] - leiding.u
     naar_rechts = leiding.u - weg["teen_r"]
     return max(max(naar_links, naar_rechts) - leiding.straal, 0.0)
+
+
+def dichtste_weg(bovengrond: dict, leiding: Leiding) -> dict | None:
+    """De weg met de kleinste horizontale afstand tot de leiding (None zonder wegen)."""
+    return min(bovengrond["wegen"], key=lambda w: afstand_tot_een_weg(w, leiding), default=None)
+
+
+def afstand_tot_weg(bovengrond: dict, leiding: Leiding) -> float:
+    """Horizontale ruimte van de rand van de leiding tot het wegprofiel (0 als erin of eronder).
+
+    Zonder wegen in het profiel is er niets om afstand tot te houden: oneindig.
+    """
+    weg = dichtste_weg(bovengrond, leiding)
+    return math.inf if weg is None else afstand_tot_een_weg(weg, leiding)
 
 
 def raakt_sloot(bovengrond: dict, u: float, diepte: float, straal: float) -> bool:
@@ -183,13 +201,13 @@ def raakt_sloot(bovengrond: dict, u: float, diepte: float, straal: float) -> boo
 
 def raakt_fundering(bovengrond: dict, u: float, diepte: float, straal: float) -> bool:
     """Raakt de leiding de funderingsstroken onder de gevels van het huis?"""
-    huis = bovengrond["huis"]
-    halve_breedte = huis["fundering_breedte"] / 2
-    for gevel in (huis["u0"], huis["u1"]):
-        dichtstbij_u = min(max(u, gevel - halve_breedte), gevel + halve_breedte)
-        dichtstbij_d = min(max(diepte, 0.0), huis["fundering_diepte"])
-        if math.hypot(u - dichtstbij_u, diepte - dichtstbij_d) <= straal:
-            return True
+    for huis in bovengrond["huizen"]:
+        halve_breedte = huis["fundering_breedte"] / 2
+        for gevel in (huis["u0"], huis["u1"]):
+            dichtstbij_u = min(max(u, gevel - halve_breedte), gevel + halve_breedte)
+            dichtstbij_d = min(max(diepte, 0.0), huis["fundering_diepte"])
+            if math.hypot(u - dichtstbij_u, diepte - dichtstbij_d) <= straal:
+                return True
     return False
 
 
@@ -239,18 +257,17 @@ def controleer_leiding(
         elif dekking < DEKKING_MIN_M:
             melding("dekking", "fout",
                     f"Te weinig dekking: {cm(dekking)}, minimaal {cm(DEKKING_MIN_M)}.")  # fmt: skip
-    weg = bovengrond["weg"]
-    if weg["teen_l"] <= leiding.u <= weg["teen_r"]:
+    gat = afstand_tot_weg(bovengrond, leiding)
+    if bovengrond["wegen"] and gat == 0:
         melding("weg", "waarschuwing", "U gaat onder de weg door.")
-    elif 0 < (gat := afstand_tot_weg(bovengrond, leiding)) < WEG_AFSTAND_MIN_M:
+    elif 0 < gat < WEG_AFSTAND_MIN_M:
         tekst = f"{cm(gat)} tot de weg, minimaal {cm(WEG_AFSTAND_MIN_M)} (indicatief)."
         melding("weg_afstand", "fout", tekst)
     if terrein_op(bovengrond, leiding.u) == "prive":
         melding("terrein", "waarschuwing", "Privéterrein: toestemming van de eigenaar nodig.")
-    huis = bovengrond["huis"]
     if raakt_fundering(bovengrond, leiding.u, leiding.diepte, straal):
         melding("huis", "fout", "De leiding raakt de fundering van een huis.")
-    elif huis["u0"] < leiding.u < huis["u1"]:
+    elif any(h["u0"] < leiding.u < h["u1"] for h in bovengrond["huizen"]):
         melding("huis", "waarschuwing", "U gaat onder een huis door.")
     for ander in bestaand:
         tussenruimte = (
@@ -336,7 +353,7 @@ def afstand_weg(bovengrond: dict, leiding: Leiding) -> dict | None:
     gat = afstand_tot_weg(bovengrond, leiding)
     if gat <= 0 or gat > MEET_BEREIK_M:
         return None
-    weg = bovengrond["weg"]
+    weg = dichtste_weg(bovengrond, leiding)
     links = leiding.u < weg["teen_l"]
     kant = 1 if links else -1
     return {
@@ -370,8 +387,13 @@ def meetlijnen(
 
 
 def bestaande_leidingen(bovengrond: dict) -> list[Leiding]:
-    """Voorbeeldleidingen die al in de grond liggen, passend bij de bovengrond."""
-    sloot, weg, huis = bovengrond["sloot"], bovengrond["weg"], bovengrond["huis"]
+    """Voorbeeldleidingen die al in de grond liggen, passend bij de bovengrond.
+
+    Bij echte omgevingsdata (BGT) zijn er geen voorbeeldleidingen: die komen uit KLIC.
+    """
+    if bovengrond["bron"] != "voorbeelddata":
+        return []
+    sloot, weg, huis = bovengrond["sloten"][0], bovengrond["wegen"][0], bovengrond["huizen"][0]
     u_kabel = round((sloot["u_midden"] + sloot["breedte_boven"] / 2 + weg["teen_l"]) / 2, 2)
     u_buis = round((weg["kruin0"] + weg["kruin1"]) / 2, 2)
     u_hoofd = round(huis["u1"] + 5.0, 2)
