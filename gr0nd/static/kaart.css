@@ -607,3 +607,43 @@ select {
   display: grid;
   gap: 6px;
 }
+
+/* 3D-blok */
+.blok {
+  position: absolute;
+  inset: 0;
+}
+
+.blok canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+a.knop {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--rand);
+  border-radius: var(--straal);
+  color: inherit;
+  text-decoration: none;
+}
+
+a.knop:hover {
+  background: rgba(238, 230, 217, 0.1);
+}
+
+.blok-gereedschap {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px;
+  border: 1px solid var(--rand);
+  border-radius: var(--straal);
+  background: rgba(21, 24, 27, 0.94);
+}

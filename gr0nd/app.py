@@ -10,12 +10,12 @@ from typing import Annotated
 
 import uvicorn
 from fastapi import Depends, FastAPI, Form, HTTPException, Request
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import FileResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from gr0nd import kaart, ontwerp, projectdata
+from gr0nd import export, kaart, ontwerp, projectdata
 from gr0nd.database import Database
 from gr0nd.gebruikers import SESSIE_DUUR, Gebruiker, Gebruikers, Rol, Sessies
 from gr0nd.projecten import Project, Projecten, ProjectIn
@@ -211,6 +211,14 @@ def maak_app(settings: Settings | None = None) -> FastAPI:
         lon, lat = kaart.rd_naar_wgs84(x, y)
         return {"lon": lon, "lat": lat}
 
+    @app.get("/api/blok")
+    def blok(_: Ingelogd, x0: float, y0: float, x1: float, y1: float, n: int = 48) -> dict:
+        """Bodemlagen van een gebied voor het 3D-blok (voorbeelddata)."""
+        try:
+            return kaart.blok(x0, y0, x1, y1, n)
+        except ValueError as fout:
+            raise HTTPException(status_code=400, detail=str(fout)) from fout
+
     @app.get("/api/profiel")
     def profiel(_: Ingelogd, punten: str, s: float = 0.0) -> dict:
         """Het 0-zicht met de bibliotheek, bestaande leidingen en de checklist."""
@@ -275,6 +283,17 @@ def maak_app(settings: Settings | None = None) -> FastAPI:
             data = projectdata.haal_projectdata(project.gebied)
             projecten.bewaar_data(project_id, data)
         return data
+
+    @app.get("/api/projecten/{project_id}/kml")
+    def project_kml(gebruiker: Ingelogd, project_id: str) -> Response:
+        project = projecten.zoek(gebruiker.id, project_id)
+        if project is None:
+            raise HTTPException(status_code=404, detail="Project niet gevonden.")
+        tekst = export.maak_kml(
+            project.naam, project.gebied, project.trace, projecten.lees_data(project_id)
+        )
+        kop = {"Content-Disposition": f'attachment; filename="{export.bestandsnaam(project.naam)}"'}
+        return Response(tekst, media_type="application/vnd.google-earth.kml+xml", headers=kop)
 
     app.mount("/static", StaticFiles(directory=STATIC_MAP), name="static")
     return app
