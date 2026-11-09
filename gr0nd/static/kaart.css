@@ -634,3 +634,16 @@ a.knop {
 a.knop:hover {
   background: rgba(238, 230, 217, 0.1);
 }
+
+.blok-gereedschap {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px;
+  border: 1px solid var(--rand);
+  border-radius: var(--straal);
+  background: rgba(21, 24, 27, 0.94);
+}

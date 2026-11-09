@@ -1370,7 +1370,10 @@ async function openZicht() {
 function zetWeergave(naam) {
   staat.weergave = naam;
   stopWandelen();
-  if (naam !== "blok") blokWeergave?.stop();
+  if (naam !== "blok") {
+    blokWeergave?.stop();
+    blokWeergave?.annuleerKeuze();
+  }
   const zichtActief = naam === "zicht";
   const blokActief = naam === "blok";
   const overzichtActief = naam === "overzicht";
@@ -1378,6 +1381,7 @@ function zetWeergave(naam) {
   $("zoek-form").hidden = !overzichtActief;
   $("zicht").hidden = !zichtActief;
   $("blok").hidden = !blokActief;
+  $("blok-gereedschap").hidden = !blokActief;
   $("paneel-overzicht").hidden = !overzichtActief;
   $("paneel-zicht").hidden = !zichtActief;
   $("positie").hidden = !zichtActief;
@@ -1408,17 +1412,63 @@ async function gebiedInRd() {
   return [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
 }
 
+const blokStaat = { heel: null, kiezen: false };
+const MIN_STUK_M = 20;
+
+async function haalBlok(bbox) {
+  const [x0, y0, x1, y1] = bbox;
+  const data = await api(`/api/blok?x0=${x0}&y0=${y0}&x1=${x1}&y1=${y1}&n=64`);
+  const schaal = blokWeergave.toon(data);
+  const breedte = Math.round(x1 - x0);
+  const diepte = Math.round(y1 - y0);
+  const over = schaal > 1.05 ? ` Hoogte ${nl(schaal, 0)}× overdreven.` : "";
+  $("balk-info").textContent = `3D-blok ${nl(breedte, 0)} × ${nl(diepte, 0)} m, 50 m diep.${over} Voorbeelddata.`;
+}
+
+function blokKiezenZetten(aan) {
+  blokStaat.kiezen = aan;
+  $("blok-snijd").setAttribute("aria-pressed", aan);
+  $("blok-info").textContent = aan ? "Sleep een rechthoek op het gras." : "Draaien: slepen. Zoomen: scrollen.";
+}
+
+async function snijStukUit(bbox) {
+  blokKiezenZetten(false);
+  const [x0, y0, x1, y1] = bbox;
+  if (x1 - x0 < MIN_STUK_M || y1 - y0 < MIN_STUK_M) return toon(`Kies een stuk van minstens ${MIN_STUK_M} m.`);
+  try {
+    await haalBlok(bbox);
+    $("blok-heel").disabled = false;
+  } catch (fout) {
+    toon(fout.message);
+  }
+}
+
+function bindBlok() {
+  $("tab-blok").addEventListener("click", openBlok);
+  $("blok-snijd").addEventListener("click", () => {
+    if (blokStaat.kiezen) {
+      blokWeergave.annuleerKeuze();
+      return blokKiezenZetten(false);
+    }
+    blokKiezenZetten(true);
+    blokWeergave.kiesStuk(snijStukUit);
+  });
+  $("blok-heel").addEventListener("click", async () => {
+    $("blok-heel").disabled = true;
+    await haalBlok(blokStaat.heel);
+  });
+}
+
 async function openBlok() {
   if (!gebied.klaar) return toon("Teken eerst een gebied.");
   try {
     await wachtOpBlokModule();
-    const [x0, y0, x1, y1] = await gebiedInRd();
-    const data = await api(`/api/blok?x0=${x0}&y0=${y0}&x1=${x1}&y1=${y1}&n=64`);
+    blokStaat.heel = await gebiedInRd();
     zetWeergave("blok");
     blokWeergave ??= new window.BlokWeergave($("blok"));
-    const schaal = blokWeergave.toon(data);
-    const over = schaal > 1.05 ? ` Hoogte ${nl(schaal, 0)}× overdreven.` : "";
-    $("balk-info").textContent = `3D-blok van het gebied, 50 m diep. Draai met slepen, zoom met scrollen.${over} Voorbeelddata.`;
+    blokKiezenZetten(false);
+    $("blok-heel").disabled = true;
+    await haalBlok(blokStaat.heel);
   } catch (fout) {
     toon(fout.message);
   }
@@ -1430,7 +1480,7 @@ async function start() {
   bindZicht();
   $("tab-overzicht").addEventListener("click", () => zetWeergave("overzicht"));
   $("tab-zicht").addEventListener("click", openZicht);
-  $("tab-blok").addEventListener("click", openBlok);
+  bindBlok();
   new ResizeObserver(() => (staat.weergave === "zicht" ? tekenZicht() : kaartObj?.resize())).observe($("vlak"));
   $("balk-info").textContent = OVERZICHT_INFO;
   try {

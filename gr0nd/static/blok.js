@@ -99,6 +99,9 @@ export class BlokWeergave {
     this.controls.maxPolarAngle = Math.PI * 0.47;
     this.blok = null;
     this.actief = false;
+    this.verschuiving = [0, 0];
+    this.selectie = null;
+    this.bindSelectie();
     new ResizeObserver(() => this.pasMaatAan()).observe(houder);
   }
 
@@ -106,6 +109,7 @@ export class BlokWeergave {
     this.leegmaken();
     const [gx0, gy0, gx1, gy1] = data.gebied;
     const [cx, cy] = [(gx0 + gx1) / 2, (gy0 + gy1) / 2];
+    this.verschuiving = [cx, cy];
     data = { ...data, gebied: [gx0 - cx, gy0 - cy, gx1 - cx, gy1 - cy] };
     const [x0, y0, x1, y1] = data.gebied;
     const breedte = Math.max(x1 - x0, y1 - y0);
@@ -134,7 +138,72 @@ export class BlokWeergave {
     return this.schaalZ;
   }
 
+  /* Selecteren van een rechthoek op het bovenvlak. `klaar` krijgt de RD-omhullende [x0, y0, x1, y1]. */
+  kiesStuk(klaar) {
+    this.selectie = { klaar, start: null, vlak: null };
+    this.controls.enabled = false;
+    this.renderer.domElement.style.cursor = "crosshair";
+  }
+
+  annuleerKeuze() {
+    if (this.selectie?.vlak) this.scene.remove(this.selectie.vlak);
+    this.selectie = null;
+    this.controls.enabled = true;
+    this.renderer.domElement.style.cursor = "";
+  }
+
+  grondPunt(gebeurtenis) {
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    const ndc = new THREE.Vector2(
+      ((gebeurtenis.clientX - rect.left) / rect.width) * 2 - 1,
+      -((gebeurtenis.clientY - rect.top) / rect.height) * 2 + 1,
+    );
+    const straal = new THREE.Raycaster();
+    straal.setFromCamera(ndc, this.camera);
+    const punt = new THREE.Vector3();
+    if (!straal.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), punt)) return null;
+    return { x: punt.x, y: -punt.z };
+  }
+
+  tekenKeuze(a, b) {
+    const sel = this.selectie;
+    if (!sel.vlak) {
+      sel.vlak = new THREE.Mesh(
+        new THREE.PlaneGeometry(1, 1),
+        new THREE.MeshBasicMaterial({ color: "#e8a860", transparent: true, opacity: 0.4, depthTest: false }),
+      );
+      sel.vlak.rotation.x = -Math.PI / 2;
+      sel.vlak.renderOrder = 5;
+      this.scene.add(sel.vlak);
+    }
+    sel.vlak.scale.set(Math.max(Math.abs(b.x - a.x), 1), Math.max(Math.abs(b.y - a.y), 1), 1);
+    sel.vlak.position.set((a.x + b.x) / 2, 0.5, -(a.y + b.y) / 2);
+  }
+
+  bindSelectie() {
+    const doek = this.renderer.domElement;
+    doek.addEventListener("pointerdown", (e) => {
+      if (!this.selectie) return;
+      this.selectie.start = this.grondPunt(e);
+      doek.setPointerCapture(e.pointerId);
+    });
+    doek.addEventListener("pointermove", (e) => {
+      const punt = this.selectie?.start && this.grondPunt(e);
+      if (punt) this.tekenKeuze(this.selectie.start, punt);
+    });
+    doek.addEventListener("pointerup", (e) => {
+      const sel = this.selectie;
+      const eind = sel?.start && this.grondPunt(e);
+      if (!eind) return;
+      const [a, b] = [sel.start, eind];
+      this.annuleerKeuze();
+      const [cx, cy] = this.verschuiving;
+      sel.klaar([Math.min(a.x, b.x) + cx, Math.min(a.y, b.y) + cy, Math.max(a.x, b.x) + cx, Math.max(a.y, b.y) + cy]);
+    });
+  }
+
   leegmaken() {
+    this.annuleerKeuze();
     if (!this.blok) return;
     this.scene.remove(this.blok);
     this.blok.traverse((o) => {
