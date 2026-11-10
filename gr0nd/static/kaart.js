@@ -1415,14 +1415,23 @@ async function gebiedInRd() {
 const blokStaat = { heel: null, kiezen: false };
 const MIN_STUK_M = 20;
 
+const ECHT_MAX_M = 600; // groter dan dit laden we de PDOK 3D-tiles niet: eerst een stuk uitsnijden
+
 async function haalBlok(bbox) {
   const [x0, y0, x1, y1] = bbox;
   const data = await api(`/api/blok?x0=${x0}&y0=${y0}&x1=${x1}&y1=${y1}&n=64`);
-  const schaal = blokWeergave.toon(data);
   const breedte = Math.round(x1 - x0);
   const diepte = Math.round(y1 - y0);
-  const over = schaal > 1.05 ? ` Hoogte ${nl(schaal, 0)}× overdreven.` : "";
-  $("balk-info").textContent = `3D-blok ${nl(breedte, 0)} × ${nl(diepte, 0)} m, 50 m diep.${over} Voorbeelddata.`;
+  const echt = Math.max(breedte, diepte) <= ECHT_MAX_M;
+  const schaal = blokWeergave.toon(data, echt);
+  const maat = `3D-blok ${nl(breedte, 0)} × ${nl(diepte, 0)} m, 50 m diep.`;
+  if (echt) {
+    blokWeergave.laadOmgeving();
+    $("balk-info").textContent = `${maat} Gebouwen en terrein: PDOK 3D. Bodemlagen: voorbeelddata.`;
+  } else {
+    const over = schaal > 1.05 ? ` Hoogte ${nl(schaal, 0)}× overdreven.` : "";
+    $("balk-info").textContent = `${maat}${over} Snijd een stuk uit van maximaal ${ECHT_MAX_M} m voor het echte 3D-beeld. Voorbeelddata.`;
+  }
   blokTraceToevoegen();
 }
 

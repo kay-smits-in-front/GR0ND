@@ -14,6 +14,7 @@ from gr0nd.kaart import (
     Trace,
     blok,
     dwarsprofiel,
+    georeferentie,
     kaartlagen,
     lees_punt,
     nederland,
@@ -241,3 +242,15 @@ def test_blok_geeft_een_raster_per_laag_met_oplopende_diepte() -> None:
 def test_blok_weigert_onmogelijke_gebieden(gebied: tuple, n: int) -> None:
     with pytest.raises(ValueError):
         blok(*gebied, n=n)
+
+
+def test_georeferentie_amsterdam_en_convergentie() -> None:
+    plek = georeferentie(121_000, 487_000)
+
+    assert plek["lon"] == pytest.approx(4.89, abs=0.05)
+    assert plek["lat"] == pytest.approx(52.37, abs=0.05)
+    # Amsterdam ligt dicht bij de RD-oorsprong (5,387° O): RD-noord wijkt slechts een fractie af.
+    assert abs(plek["convergentie"]) < 0.5
+    # Ten oosten van de centrale meridiaan (meridianen convergeren) wijst RD-noord naar het oosten.
+    assert georeferentie(250_000, 487_000)["convergentie"] > 0.5
+    assert georeferentie(20_000, 487_000)["convergentie"] < -0.5

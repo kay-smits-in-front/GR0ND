@@ -3,6 +3,15 @@
    Bodemlagen komen van /api/blok en zijn voorbeelddata. Draaien: slepen, zoomen: scrollen. */
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/OrbitControls.js";
+import { DRACOLoader } from "three/addons/loaders/DRACOLoader.js";
+import { MeshoptDecoder } from "three/addons/libs/meshopt_decoder.module.js";
+import { GLTFExtensionsPlugin, TilesRenderer, WGS84_ELLIPSOID } from "/static/vendor/3d-tiles-renderer.js";
+
+const PDOK_3D = "https://api.pdok.nl/kadaster/3d-basisvoorziening/ogc/v1/collections";
+export const OMGEVING_BRONNEN = {
+  terreinen: `${PDOK_3D}/terreinen/3dtiles?f=json`,
+  gebouwen: `${PDOK_3D}/gebouwen/3dtiles?f=json`,
+};
 
 const ZIJDEN_SCHADUW = { zuid: 0.92, oost: 0.74, noord: 0.6, west: 0.8 };
 
@@ -121,6 +130,33 @@ function bouwGordijn(boven, onder) {
   return new THREE.Mesh(geometrie, materiaal);
 }
 
+/* Matrix die ECEF (3D Tiles) naar de blokscène brengt: eerst lokaal ENU bij het midden, dan de hoek tussen
+   RD-noord en ware noord eruit draaien. Scène: x = RD-oost, y = omhoog, z = -RD-noord. */
+export function ecefNaarScene(lonGraden, latGraden, convergentieGraden) {
+  const enu = WGS84_ELLIPSOID.getEastNorthUpFrame(
+    THREE.MathUtils.degToRad(latGraden),
+    THREE.MathUtils.degToRad(lonGraden),
+    0,
+    new THREE.Matrix4(),
+  );
+  const g = THREE.MathUtils.degToRad(convergentieGraden);
+  const [c, sn] = [Math.cos(g), Math.sin(g)];
+  const enuNaarScene = new THREE.Matrix4().set(c, -sn, 0, 0, 0, 0, 1, 0, -sn, -c, 0, 0, 0, 0, 0, 1);
+  return enuNaarScene.multiply(enu.invert());
+}
+
+function maakTegels(url, matrix, dracoLoader, camera, renderer, errorTarget) {
+  const tegels = new TilesRenderer(url);
+  tegels.registerPlugin(new GLTFExtensionsPlugin({ dracoLoader, meshoptDecoder: MeshoptDecoder }));
+  tegels.group.matrixAutoUpdate = false;
+  tegels.group.matrix.copy(matrix);
+  tegels.group.matrixWorldNeedsUpdate = true;
+  tegels.errorTarget = errorTarget;
+  tegels.setCamera(camera);
+  tegels.setResolutionFromRenderer(camera, renderer);
+  return tegels;
+}
+
 export class BlokWeergave {
   constructor(houder) {
     this.houder = houder;
@@ -129,6 +165,10 @@ export class BlokWeergave {
     houder.append(this.renderer.domElement);
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(32, 1, 1, 1e6);
+    this.scene.add(new THREE.HemisphereLight("#dfeaff", "#6b5a45", 1.6));
+    const zon = new THREE.DirectionalLight("#fff1d6", 2.2);
+    zon.position.set(-300, 500, 250);
+    this.scene.add(zon);
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
     this.controls.enableDamping = true;
     this.controls.maxPolarAngle = Math.PI * 0.47;
@@ -140,19 +180,23 @@ export class BlokWeergave {
     new ResizeObserver(() => this.pasMaatAan()).observe(houder);
   }
 
-  toon(data) {
+  toon(data, echt = false) {
     this.leegmaken();
     const [gx0, gy0, gx1, gy1] = data.gebied;
     const [cx, cy] = [(gx0 + gx1) / 2, (gy0 + gy1) / 2];
     this.verschuiving = [cx, cy];
+    this.gebiedLokaal = [gx0 - cx, -(gy1 - cy), gx1 - cx, -(gy0 - cy)];
     data = { ...data, gebied: [gx0 - cx, gy0 - cy, gx1 - cx, gy1 - cy] };
     const [x0, y0, x1, y1] = data.gebied;
     const breedte = Math.max(x1 - x0, y1 - y0);
     this.breedte = breedte;
-    this.schaalZ = overdrijving(breedte, data.diepte);
+    this.echt = echt;
+    this.midden = data.midden;
+    this.schaalZ = echt ? 1 : overdrijving(breedte, data.diepte);
     this.blok = new THREE.Group();
     for (const naam of Object.keys(ZIJDEN_SCHADUW)) this.blok.add(bouwZijde(data, naam, this.schaalZ));
-    this.blok.add(bouwBovenvlak(data));
+    this.bovenvlak = bouwBovenvlak(data);
+    this.blok.add(this.bovenvlak);
     this.scene.add(this.blok);
     this.scene.background = new THREE.Color("#12303a");
     const midden = new THREE.Vector3((x0 + x1) / 2, (-data.diepte * this.schaalZ) / 2.4, -(y0 + y1) / 2);
@@ -244,7 +288,7 @@ export class BlokWeergave {
     if (!this.blok || rd.length < 2) return 0;
     const [cx, cy] = this.verschuiving;
     const breedte = this.breedte;
-    const straal = Math.max(breedte * 0.0004, 0.3);
+    const straal = this.echt ? 0.15 : Math.max(breedte * 0.0004, 0.3);
     const maaiveld = rd.map(([x, y]) => new THREE.Vector3(x - cx, straal, -(y - cy)));
     const leiding = maaiveld.map((p) => new THREE.Vector3(p.x, -diepteM * this.schaalZ, p.z));
     this.trace = new THREE.Group();
@@ -312,7 +356,54 @@ export class BlokWeergave {
     this.laatste = performance.now();
   }
 
+  /* Echte omgeving: PDOK 3D Tiles (terrein en gebouwen), afgeknipt tot het blok. Alleen voor kleine gebieden. */
+  laadOmgeving(bronnen = OMGEVING_BRONNEN) {
+    this.wisOmgeving();
+    if (!this.blok || !this.midden) return;
+    const [x0, y0, x1, y1] = this.gebiedLokaal; // y0 en y1 zijn hier z-grenzen van de scène
+    this.renderer.localClippingEnabled = false;
+    const rand = 0.1; // net buiten de wanden, anders flikkeren die op het afknipvlak
+    this.renderer.clippingPlanes = [
+      new THREE.Plane(new THREE.Vector3(1, 0, 0), -x0 + rand),
+      new THREE.Plane(new THREE.Vector3(-1, 0, 0), x1 + rand),
+      new THREE.Plane(new THREE.Vector3(0, 0, 1), -y0 + rand),
+      new THREE.Plane(new THREE.Vector3(0, 0, -1), y1 + rand),
+    ];
+    const matrix = ecefNaarScene(this.midden.lon, this.midden.lat, this.midden.convergentie);
+    this.dracoLoader ??= new DRACOLoader().setDecoderPath("/static/vendor/draco/");
+    this.omgeving = new THREE.Group();
+    this.tegels = Object.entries(bronnen).map(([naam, url]) => {
+      const tegels = maakTegels(url, matrix, this.dracoLoader, this.camera, this.renderer, 8);
+      tegels.addEventListener("load-error", (e) => console.warn(`PDOK ${naam}:`, e.error?.message ?? e));
+      this.omgeving.add(tegels.group);
+      return tegels;
+    });
+    this.scene.add(this.omgeving);
+  }
+
+  /* Zodra terrein er is: verberg het nepvlak en breng het maaiveld op y = 0 (hoogtes in de tiles zijn ellipsoïdisch).
+     Wordt per beeld geprobeerd tot er terrein onder het midden zit. */
+  kalibreerHoogte() {
+    this.omgeving.updateMatrixWorld(true);
+    const straal = new THREE.Raycaster(new THREE.Vector3(0, 5000, 0), new THREE.Vector3(0, -1, 0));
+    const treffer = straal.intersectObject(this.tegels[0].group, true)[0];
+    if (!treffer) return;
+    this.omgeving.position.y -= treffer.point.y;
+    this.hoogteGekalibreerd = true;
+    if (this.bovenvlak) this.bovenvlak.visible = false;
+  }
+
+  wisOmgeving() {
+    this.tegels?.forEach((t) => t.dispose());
+    if (this.omgeving) this.scene.remove(this.omgeving);
+    this.tegels = null;
+    this.omgeving = null;
+    this.hoogteGekalibreerd = false;
+    this.renderer.clippingPlanes = [];
+  }
+
   leegmaken() {
+    this.wisOmgeving();
     this.wisTrace();
     this.annuleerKeuze();
     if (!this.blok) return;
@@ -351,6 +442,9 @@ export class BlokWeergave {
     if (!this.actief) return;
     if (this.speelt) this.loopStap();
     this.controls.update();
+    this.camera.updateMatrixWorld();
+    this.tegels?.forEach((t) => t.update());
+    if (this.tegels && !this.hoogteGekalibreerd) this.kalibreerHoogte();
     this.renderer.render(this.scene, this.camera);
     requestAnimationFrame(() => this.lus());
   }

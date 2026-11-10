@@ -200,6 +200,19 @@ BLOK_MAX_M = 15_000.0  # grootste zijde van een gebied dat als blok wordt opgevr
 BLOK_RASTER = (8, 96)  # kleinste en grootste aantal rasterpunten per zijde
 
 
+def georeferentie(x: float, y: float) -> dict:
+    """Plek in lengte/breedtegraad en de hoek tussen RD-noord en ware noord (graden, oost positief).
+
+    Nodig om 3D-data in ECEF (3D Tiles) in het RD-vlak van het blok te leggen.
+    """
+    naar_ll = transformer("EPSG:28992", "EPSG:4326")
+    lon, lat = naar_ll.transform(x, y)
+    lon_n, lat_n = naar_ll.transform(x, y + 100.0)
+    oost = (lon_n - lon) * math.cos(math.radians(lat))
+    noord = lat_n - lat
+    return {"lon": lon, "lat": lat, "convergentie": math.degrees(math.atan2(oost, noord))}
+
+
 def blok(x0: float, y0: float, x1: float, y1: float, n: int = 48) -> dict:
     """Bodemlagen van een gebied (RD, meters) op een raster van n × n punten, voor het 3D-blok.
 
@@ -221,6 +234,7 @@ def blok(x0: float, y0: float, x1: float, y1: float, n: int = 48) -> dict:
         "bron": "voorbeelddata",
         "crs": "EPSG:28992",
         "gebied": [x0, y0, x1, y1],
+        "midden": georeferentie((x0 + x1) / 2, (y0 + y1) / 2),
         "n": n,
         "diepte": DIEPTE_M,
         "lagen": [{"id": laag.id, "naam": laag.naam, "kleur": laag.kleur} for laag in LAGEN],
