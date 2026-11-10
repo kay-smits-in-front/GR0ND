@@ -647,3 +647,14 @@ a.knop:hover {
   border-radius: var(--straal);
   background: rgba(21, 24, 27, 0.94);
 }
+
+.blok-gereedschap input[type="range"] {
+  width: 160px;
+  accent-color: var(--lijn);
+}
+
+.blok-gereedschap output {
+  min-width: 56px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}

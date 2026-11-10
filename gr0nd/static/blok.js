@@ -86,6 +86,41 @@ function bouwBovenvlak(data) {
   return vlak;
 }
 
+function padLengtes(punten) {
+  const lengtes = [0];
+  for (let i = 1; i < punten.length; i++) lengtes.push(lengtes[i - 1] + punten[i].distanceTo(punten[i - 1]));
+  return lengtes;
+}
+
+/* Buis door de punten van een lijn; elk knikpunt is een hoekpunt van de buis. */
+function bouwBuis(punten, straal, kleur) {
+  const pad = new THREE.CurvePath();
+  for (let i = 1; i < punten.length; i++) pad.add(new THREE.LineCurve3(punten[i - 1], punten[i]));
+  const geometrie = new THREE.TubeGeometry(pad, Math.max(8, punten.length * 6), straal, 8, false);
+  return new THREE.Mesh(geometrie, new THREE.MeshBasicMaterial({ color: kleur }));
+}
+
+/* Doorschijnend gordijn tussen het tracé aan de oppervlakte en de leiding in de grond. */
+function bouwGordijn(boven, onder) {
+  const posities = [];
+  const index = [];
+  boven.forEach((p, i) => {
+    posities.push(p.x, p.y, p.z, onder[i].x, onder[i].y, onder[i].z);
+    if (i) index.push(2 * i - 2, 2 * i - 1, 2 * i, 2 * i, 2 * i - 1, 2 * i + 1);
+  });
+  const geometrie = new THREE.BufferGeometry();
+  geometrie.setAttribute("position", new THREE.Float32BufferAttribute(posities, 3));
+  geometrie.setIndex(index);
+  const materiaal = new THREE.MeshBasicMaterial({
+    color: "#e8a860",
+    transparent: true,
+    opacity: 0.22,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+  });
+  return new THREE.Mesh(geometrie, materiaal);
+}
+
 export class BlokWeergave {
   constructor(houder) {
     this.houder = houder;
@@ -113,6 +148,7 @@ export class BlokWeergave {
     data = { ...data, gebied: [gx0 - cx, gy0 - cy, gx1 - cx, gy1 - cy] };
     const [x0, y0, x1, y1] = data.gebied;
     const breedte = Math.max(x1 - x0, y1 - y0);
+    this.breedte = breedte;
     this.schaalZ = overdrijving(breedte, data.diepte);
     this.blok = new THREE.Group();
     for (const naam of Object.keys(ZIJDEN_SCHADUW)) this.blok.add(bouwZijde(data, naam, this.schaalZ));
@@ -202,7 +238,82 @@ export class BlokWeergave {
     });
   }
 
+  /* Tracé (RD-punten) met de leiding op `diepteM` onder maaiveld. Geeft de lengte in meters. */
+  zetTrace(rd, diepteM) {
+    this.wisTrace();
+    if (!this.blok || rd.length < 2) return 0;
+    const [cx, cy] = this.verschuiving;
+    const breedte = this.breedte;
+    const straal = Math.max(breedte * 0.0004, 0.3);
+    const maaiveld = rd.map(([x, y]) => new THREE.Vector3(x - cx, straal, -(y - cy)));
+    const leiding = maaiveld.map((p) => new THREE.Vector3(p.x, -diepteM * this.schaalZ, p.z));
+    this.trace = new THREE.Group();
+    this.trace.add(bouwBuis(maaiveld, straal, "#ffb454"), bouwBuis(leiding, straal * 1.3, "#ff5a3c"));
+    this.trace.add(bouwGordijn(maaiveld, leiding));
+    this.scene.add(this.trace);
+    this.pad = { punten: maaiveld, lengtes: padLengtes(maaiveld) };
+    return this.pad.lengtes.at(-1);
+  }
+
+  wisTrace() {
+    if (!this.trace) return;
+    this.scene.remove(this.trace);
+    this.trace.traverse((o) => {
+      o.geometry?.dispose();
+      o.material?.dispose();
+    });
+    this.trace = null;
+    this.pad = null;
+    this.zetVolgen(false);
+  }
+
+  /* Punt en looprichting op afstand s langs het tracé. */
+  plekOp(s) {
+    const { punten, lengtes } = this.pad;
+    const nr = Math.min(Math.max(lengtes.findIndex((l) => l >= s) - 1, 0), punten.length - 2);
+    const [a, b] = [punten[nr], punten[nr + 1]];
+    const t = Math.min(Math.max((s - lengtes[nr]) / Math.max(lengtes[nr + 1] - lengtes[nr], 1e-6), 0), 1);
+    return { punt: a.clone().lerp(b, t), richting: b.clone().sub(a).setY(0).normalize() };
+  }
+
+  /* Camera achter het punt op afstand s, kijkend langs het tracé (zoals lopen in een spel). */
+  zetPositie(s) {
+    if (!this.pad || !this.volgen) return;
+    const { punt, richting } = this.plekOp(s);
+    const achter = Math.max(25, this.breedte * 0.03);
+    this.camera.position.copy(punt).addScaledVector(richting, -achter).setY(achter * 0.4);
+    this.controls.target.copy(punt).addScaledVector(richting, achter * 1.5).setY(0);
+    this.camera.lookAt(this.controls.target);
+  }
+
+  zetVolgen(aan) {
+    if (aan && !this.pad) return;
+    if (aan && !this.volgen) this.overzicht = { positie: this.camera.position.clone(), doel: this.controls.target.clone() };
+    if (!aan && this.volgen && this.overzicht) {
+      this.camera.position.copy(this.overzicht.positie);
+      this.controls.target.copy(this.overzicht.doel);
+    }
+    this.volgen = aan;
+    this.controls.enabled = !aan && !this.selectie;
+    if (!aan) this.speelt = false;
+  }
+
+  ga(afstand) {
+    this.afstand = afstand;
+    this.zetPositie(afstand);
+  }
+
+  /* Automatisch lopen met `snelheid` m/s; `bijwerk(s)` krijgt de nieuwe afstand. */
+  speel(aan, snelheid, bijwerk) {
+    this.speelt = aan && !!this.pad;
+    if (this.speelt && this.afstand >= this.pad.lengtes.at(-1)) this.afstand = 0;
+    this.snelheid = snelheid;
+    this.bijwerk = bijwerk;
+    this.laatste = performance.now();
+  }
+
   leegmaken() {
+    this.wisTrace();
     this.annuleerKeuze();
     if (!this.blok) return;
     this.scene.remove(this.blok);
@@ -226,8 +337,19 @@ export class BlokWeergave {
     this.camera.updateProjectionMatrix();
   }
 
+  loopStap() {
+    const nu = performance.now();
+    const lengte = this.pad.lengtes.at(-1);
+    this.afstand = Math.min((this.afstand ?? 0) + (this.snelheid * (nu - this.laatste)) / 1000, lengte);
+    this.laatste = nu;
+    this.zetPositie(this.afstand);
+    this.bijwerk?.(this.afstand);
+    if (this.afstand >= lengte) this.speelt = false;
+  }
+
   lus() {
     if (!this.actief) return;
+    if (this.speelt) this.loopStap();
     this.controls.update();
     this.renderer.render(this.scene, this.camera);
     requestAnimationFrame(() => this.lus());

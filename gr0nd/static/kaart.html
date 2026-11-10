@@ -120,6 +120,11 @@
         <div id="blok-gereedschap" class="blok-gereedschap" hidden>
           <button id="blok-snijd" type="button" aria-pressed="false">Snijd stuk uit</button>
           <button id="blok-heel" type="button" disabled>Heel gebied</button>
+          <button id="blok-volg" type="button" aria-pressed="false" hidden>Loop door het tracé</button>
+          <button id="blok-loop" type="button" aria-pressed="false" hidden>Speel af</button>
+          <label for="blok-positie" class="verborgen">Positie langs het tracé</label>
+          <input id="blok-positie" type="range" min="0" max="100" step="1" value="0" hidden />
+          <output id="blok-meter" hidden></output>
           <span id="blok-info" class="zacht"></span>
         </div>
         <canvas id="zicht" aria-label="0-zicht: doorsnede loodrecht op het tracé" hidden></canvas>
