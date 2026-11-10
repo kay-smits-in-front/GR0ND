@@ -1426,8 +1426,9 @@ async function haalBlok(bbox) {
   const schaal = blokWeergave.toon(data, echt);
   const maat = `3D-blok ${nl(breedte, 0)} × ${nl(diepte, 0)} m, 50 m diep.`;
   if (echt) {
-    blokWeergave.laadOmgeving();
-    $("balk-info").textContent = `${maat} Gebouwen en terrein: PDOK 3D. Bodemlagen: voorbeelddata.`;
+    const toon = (tekst) => ($("balk-info").textContent = `${maat} ${tekst} Bodemlagen: voorbeelddata.`);
+    blokWeergave.laadOmgeving(undefined, toon);
+    toon("PDOK 3D (gebouwen, terrein) wordt geladen…");
   } else {
     const over = schaal > 1.05 ? ` Hoogte ${nl(schaal, 0)}× overdreven.` : "";
     $("balk-info").textContent = `${maat}${over} Snijd een stuk uit van maximaal ${ECHT_MAX_M} m voor het echte 3D-beeld. Voorbeelddata.`;

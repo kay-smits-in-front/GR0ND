@@ -357,8 +357,9 @@ export class BlokWeergave {
   }
 
   /* Echte omgeving: PDOK 3D Tiles (terrein en gebouwen), afgeknipt tot het blok. Alleen voor kleine gebieden. */
-  laadOmgeving(bronnen = OMGEVING_BRONNEN) {
+  laadOmgeving(bronnen = OMGEVING_BRONNEN, melding = () => {}) {
     this.wisOmgeving();
+    this.melding = melding;
     if (!this.blok || !this.midden) return;
     const [x0, y0, x1, y1] = this.gebiedLokaal; // y0 en y1 zijn hier z-grenzen van de scène
     this.renderer.localClippingEnabled = false;
@@ -374,7 +375,10 @@ export class BlokWeergave {
     this.omgeving = new THREE.Group();
     this.tegels = Object.entries(bronnen).map(([naam, url]) => {
       const tegels = maakTegels(url, matrix, this.dracoLoader, this.camera, this.renderer, 8);
-      tegels.addEventListener("load-error", (e) => console.warn(`PDOK ${naam}:`, e.error?.message ?? e));
+      tegels.addEventListener("load-error", (e) => {
+        console.warn(`PDOK ${naam}:`, e.error?.message ?? e);
+        this.melding(`PDOK 3D ${naam} laden mislukt: ${e.error?.message ?? "onbekende fout"}. Het blok toont voorbeelddata.`);
+      });
       this.omgeving.add(tegels.group);
       return tegels;
     });
@@ -391,6 +395,7 @@ export class BlokWeergave {
     this.omgeving.position.y -= treffer.point.y;
     this.hoogteGekalibreerd = true;
     if (this.bovenvlak) this.bovenvlak.visible = false;
+    this.melding("PDOK 3D-terrein geladen. Gebouwen laden mee.");
   }
 
   wisOmgeving() {
