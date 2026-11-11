@@ -15,6 +15,28 @@ export const OMGEVING_BRONNEN = {
 
 const ZIJDEN_SCHADUW = { zuid: 0.92, oost: 0.74, noord: 0.6, west: 0.8 };
 
+const LUCHT = { boven: "#4f86c6", horizon: "#dce8ee" };
+const ONDER = "#1d140c"; // achtergrond en nevel onder de grond
+
+/* Achtergrond met kleurverloop van zenit naar horizon. */
+function maakLucht() {
+  const doek = document.createElement("canvas");
+  doek.width = 2;
+  doek.height = 256;
+  const ctx = doek.getContext("2d");
+  const verloop = ctx.createLinearGradient(0, 0, 0, 256);
+  verloop.addColorStop(0, LUCHT.boven);
+  verloop.addColorStop(1, LUCHT.horizon);
+  ctx.fillStyle = verloop;
+  ctx.fillRect(0, 0, 2, 256);
+  const textuur = new THREE.CanvasTexture(doek);
+  textuur.colorSpace = THREE.SRGBColorSpace;
+  return textuur;
+}
+
+/* Vaste korrel per voxel (0,94 tot 1,06), zodat grondlagen niet vlak ogen. */
+const korrel = (a, b) => 0.94 + 0.12 * (Math.abs(Math.sin(a * 12.9898 + b * 78.233) * 43758.5453) % 1);
+
 function mengKleur(hex, factor) {
   const kleur = new THREE.Color(hex);
   return kleur.multiplyScalar(factor);
@@ -87,7 +109,7 @@ function bouwVoxelWand(og, naam, gebied, [cx, cy], schaalZ) {
       if (code === -127) return;
       const boven = (kolom.maaiveld - j * og.stap_z - og.referentie_nap) * schaalZ;
       const onder = boven - og.stap_z * schaalZ;
-      const kleur = mengKleur(kleurVan[code] ?? "#777777", ZIJDEN_SCHADUW[naam]);
+      const kleur = mengKleur(kleurVan[code] ?? "#777777", ZIJDEN_SCHADUW[naam] * korrel(pos, j));
       for (const [l, h] of [[l0, boven], [l0, onder], [l1, boven], [l1, boven], [l0, onder], [l1, onder]]) {
         posities.push(...punt(l, h));
         kleuren.push(kleur.r, kleur.g, kleur.b);
@@ -224,13 +246,18 @@ export class BlokWeergave {
     this.houder = houder;
     this.renderer = new THREE.WebGLRenderer({ antialias: true });
     this.renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.lucht = maakLucht();
     houder.append(this.renderer.domElement);
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(32, 1, 1, 1e6);
     this.scene.add(new THREE.HemisphereLight("#dfeaff", "#6b5a45", 1.6));
-    const zon = new THREE.DirectionalLight("#fff1d6", 2.2);
-    zon.position.set(-300, 500, 250);
-    this.scene.add(zon);
+    this.zon = new THREE.DirectionalLight("#fff1d6", 2.6);
+    this.zon.castShadow = true;
+    this.zon.shadow.mapSize.set(2048, 2048);
+    this.scene.add(this.zon, this.zon.target);
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
     this.controls.enableDamping = true;
     this.controls.maxPolarAngle = Math.PI * 0.47;
@@ -276,7 +303,8 @@ export class BlokWeergave {
     this.bovenvlak = bouwBovenvlak(data);
     this.blok.add(this.bovenvlak);
     this.scene.add(this.blok);
-    this.scene.background = new THREE.Color("#12303a");
+    this.zetZon(breedte);
+    this.zetSfeer();
     const midden = new THREE.Vector3((x0 + x1) / 2, (-data.diepte * this.schaalZ) / 2.4, -(y0 + y1) / 2);
     const afstand = breedte * 2.3;
     const hoek = (30 * Math.PI) / 180;
@@ -452,9 +480,29 @@ export class BlokWeergave {
     this.netten = null;
   }
 
+  /* Zon schuin uit het zuidwesten; het schaduwvak dekt het hele blok. */
+  zetZon(breedte) {
+    const rand = breedte * 0.75;
+    this.zon.position.set(-breedte * 0.6, breedte * 0.9, breedte * 0.5);
+    this.zon.target.position.set(0, 0, 0);
+    Object.assign(this.zon.shadow.camera, { left: -rand, right: rand, top: rand, bottom: -rand, near: 1, far: breedte * 3 });
+    this.zon.shadow.camera.updateProjectionMatrix();
+    this.zon.shadow.bias = -0.0005;
+  }
+
+  /* Boven: lucht en nevel aan de horizon. Onder de grond: donker en aards, nevel dichtbij. */
+  zetSfeer() {
+    const b = this.breedte ?? 1000;
+    this.scene.background = this.ondergronds ? new THREE.Color(ONDER) : this.lucht;
+    this.scene.fog = this.ondergronds
+      ? new THREE.Fog(ONDER, b * 0.6, b * 3)
+      : new THREE.Fog(LUCHT.horizon, b * 2.5, b * 9);
+  }
+
   /* Onder de grond kijken: terrein en grasvlak weg, camera mag onder het maaiveld. Gebouwen blijven staan. */
   zetOndergronds(aan) {
     this.ondergronds = aan;
+    this.zetSfeer();
     if (this.tegels?.[0]) this.tegels[0].group.visible = !aan;
     if (this.bovenvlak) this.bovenvlak.visible = !aan && !this.hoogteGekalibreerd;
     this.controls.maxPolarAngle = aan ? Math.PI : Math.PI * 0.47;
@@ -497,6 +545,11 @@ export class BlokWeergave {
     this.omgeving = new THREE.Group();
     this.tegels = Object.entries(bronnen).map(([naam, url]) => {
       const tegels = maakTegels(url, matrix, this.dracoLoader, this.camera, this.renderer, 8);
+      tegels.addEventListener("load-model", ({ scene }) =>
+        scene.traverse((o) => {
+          if (o.isMesh) o.castShadow = o.receiveShadow = true;
+        }),
+      );
       tegels.addEventListener("load-error", (e) => {
         console.warn(`PDOK ${naam}:`, e.error?.message ?? e);
         this.melding(`PDOK 3D ${naam} laden mislukt: ${e.error?.message ?? "onbekende fout"}. Open het blok opnieuw om het nog eens te proberen.`);
