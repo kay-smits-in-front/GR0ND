@@ -1415,14 +1415,68 @@ async function gebiedInRd() {
 const blokStaat = { heel: null, kiezen: false };
 const MIN_STUK_M = 20;
 
+const ECHT_MAX_M = 600; // groter dan dit laden we de PDOK 3D-tiles niet: eerst een stuk uitsnijden
+
 async function haalBlok(bbox) {
   const [x0, y0, x1, y1] = bbox;
   const data = await api(`/api/blok?x0=${x0}&y0=${y0}&x1=${x1}&y1=${y1}&n=64`);
-  const schaal = blokWeergave.toon(data);
   const breedte = Math.round(x1 - x0);
   const diepte = Math.round(y1 - y0);
-  const over = schaal > 1.05 ? ` Hoogte ${nl(schaal, 0)}× overdreven.` : "";
-  $("balk-info").textContent = `3D-blok ${nl(breedte, 0)} × ${nl(diepte, 0)} m, 50 m diep.${over} Voorbeelddata.`;
+  const echt = Math.max(breedte, diepte) <= ECHT_MAX_M;
+  const schaal = blokWeergave.toon(data, echt);
+  const maat = `3D-blok ${nl(breedte, 0)} × ${nl(diepte, 0)} m, 50 m diep.`;
+  if (echt) {
+    const toon = (tekst) => ($("balk-info").textContent = `${maat} ${tekst} Bodemlagen: voorbeelddata.`);
+    blokWeergave.laadOmgeving(undefined, toon);
+    toon("PDOK 3D (gebouwen, terrein) wordt geladen…");
+  } else {
+    const over = schaal > 1.05 ? ` Hoogte ${nl(schaal, 0)}× overdreven.` : "";
+    $("balk-info").textContent = `${maat}${over} Snijd een stuk uit van maximaal ${ECHT_MAX_M} m voor het echte 3D-beeld. Voorbeelddata.`;
+  }
+  blokTraceToevoegen();
+}
+
+const LEIDING_DIEPTE_M = 1.2;
+
+function blokTraceToevoegen() {
+  const lengte = blokWeergave.zetTrace(staat.trace.rd, LEIDING_DIEPTE_M);
+  const heeft = lengte > 0;
+  for (const id of ["blok-volg", "blok-loop", "blok-positie", "blok-meter"]) $(id).hidden = !heeft;
+  $("blok-positie").max = Math.floor(lengte);
+  $("blok-positie").value = 0;
+  $("blok-volg").setAttribute("aria-pressed", false);
+  $("blok-loop").setAttribute("aria-pressed", false);
+  $("blok-meter").textContent = "";
+}
+
+function blokPositieTonen(afstand) {
+  $("blok-positie").value = afstand;
+  $("blok-meter").textContent = `${nl(afstand, 0)} m`;
+}
+
+function blokVolgenZetten(aan) {
+  blokWeergave.zetVolgen(aan);
+  $("blok-volg").setAttribute("aria-pressed", aan);
+  if (aan) blokWeergave.ga(Number($("blok-positie").value));
+  if (!aan) {
+    blokWeergave.speel(false);
+    $("blok-loop").setAttribute("aria-pressed", false);
+  }
+}
+
+function bindBlokTrace() {
+  $("blok-volg").addEventListener("click", () => blokVolgenZetten($("blok-volg").getAttribute("aria-pressed") !== "true"));
+  $("blok-positie").addEventListener("input", () => {
+    blokVolgenZetten(true);
+    blokWeergave.ga(Number($("blok-positie").value));
+    blokPositieTonen(Number($("blok-positie").value));
+  });
+  $("blok-loop").addEventListener("click", () => {
+    const aan = $("blok-loop").getAttribute("aria-pressed") !== "true";
+    if (aan) blokVolgenZetten(true);
+    $("blok-loop").setAttribute("aria-pressed", aan);
+    blokWeergave.speel(aan, 10, blokPositieTonen);
+  });
 }
 
 function blokKiezenZetten(aan) {
@@ -1444,6 +1498,7 @@ async function snijStukUit(bbox) {
 }
 
 function bindBlok() {
+  bindBlokTrace();
   $("tab-blok").addEventListener("click", openBlok);
   $("blok-snijd").addEventListener("click", () => {
     if (blokStaat.kiezen) {
