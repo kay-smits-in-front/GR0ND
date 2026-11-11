@@ -143,3 +143,15 @@ def test_api_aanleg_geeft_duur_en_grondverzet(monkeypatch) -> None:
     vraag = {"punten": "0,0;150,0", "wijze": "ontgraven", "snelheid_m_per_uur": 30}
     data = TestClient(maak_app(DEMO)).get("/api/aanleg", params=vraag).json()
     assert data["duur_uren"] == 5 and data["grondverzet_m3"] == round(150 * 0.6 * 1.3, 1)
+
+
+def test_api_aanleg_geojson_is_een_download(monkeypatch) -> None:
+    from gr0nd import netten
+
+    monkeypatch.setattr(netten, "haal_netten", lambda gebied: {"soorten": [], "lagen": []})
+    vraag = {"punten": "136000,455000;136100,455000", "wijze": "boring", "naam": "Mijn tracé"}
+    antwoord = TestClient(maak_app(DEMO)).get("/api/aanleg/geojson", params=vraag)
+    assert antwoord.status_code == 200
+    assert "gr0nd-Mijn-trac-trace.geojson" in antwoord.headers["content-disposition"]
+    lijn = antwoord.json()["features"][0]
+    assert lijn["properties"]["wijze"] == "boring" and len(lijn["geometry"]["coordinates"]) > 2

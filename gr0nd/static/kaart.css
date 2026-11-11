@@ -516,3 +516,58 @@ a.knop:hover {
 .blok-legenda p {
   margin: 4px 0;
 }
+
+.aanleg-paneel {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  width: 280px;
+  padding: 8px 12px;
+  border: 1px solid var(--rand);
+  border-radius: var(--straal);
+  background: rgba(21, 24, 27, 0.94);
+  font-size: 13px;
+}
+
+.aanleg-paneel h3 {
+  margin: 4px 0 8px;
+  font-size: 13px;
+}
+
+.aanleg-paneel .velden {
+  display: grid;
+  grid-template-columns: 1fr 96px;
+  gap: 4px 8px;
+  align-items: center;
+}
+
+.aanleg-paneel [hidden] {
+  display: none;
+}
+
+.uitkomst {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 8px;
+  margin: 8px 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.uitkomst dt {
+  color: var(--tekst-zacht);
+}
+
+.uitkomst dd {
+  margin: 0;
+}
+
+@media (max-width: 900px) {
+  .aanleg-paneel {
+    width: auto;
+    right: 12px;
+  }
+
+  .blok-legenda {
+    display: none;
+  }
+}

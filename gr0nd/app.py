@@ -1,5 +1,6 @@
 """GR0ND applicatie: instellingen, routes en lokale start."""
 
+import json
 import threading
 import webbrowser
 from collections.abc import AsyncIterator
@@ -33,17 +34,6 @@ class Settings(BaseSettings):
     omgeving: str = "lokaal"
     database_url: str = ""
     data_map: str = "data"  # hier staan de projecten (voorlopig als bestand)
-
-
-class AanlegIn(BaseModel):
-    """Instellingen van de aanleg, met grenzen die in de praktijk voorkomen."""
-
-    wijze: aanleg.Wijze
-    diepte: float = Field(1.2, ge=0.3, le=40)
-    intrede_graden: float = Field(10.0, ge=3, le=45)
-    uittrede_graden: float = Field(10.0, ge=3, le=45)
-    sleuf_breedte: float = Field(0.6, ge=0.2, le=3)
-    snelheid_m_per_uur: float = Field(15.0, gt=0, le=500)
 
 
 class WereldIn(BaseModel):
@@ -110,6 +100,29 @@ def lees_punten(tekst: str) -> list[tuple[float, float]]:
         return [tuple(float(deel) for deel in paar.split(",")) for paar in tekst.split(";")]
     except ValueError as fout:
         raise HTTPException(status_code=400, detail="Punten zijn niet goed opgegeven.") from fout
+
+
+def bereken_aanleg(paren: list[tuple[float, float]], instelling: aanleg.Aanleg) -> dict:
+    """Profiel, duur, grondverzet en kruisingen voor het tracé (RD-punten), of 400."""
+    if len(paren) < 2:
+        raise HTTPException(status_code=400, detail="Geef minstens 2 punten.")
+    xs, ys = [x for x, _ in paren], [y for _, y in paren]
+    gebied = (min(xs) - 5, min(ys) - 5, max(xs) + 5, max(ys) + 5)
+    if max(gebied[2] - gebied[0], gebied[3] - gebied[1]) > wereld.MAX_ZIJDE_M:
+        raise HTTPException(status_code=400, detail="Het tracé is te lang voor de netcontrole.")
+    # shortcut: haalt de netten opnieuw op; cachen als dit te traag wordt
+    net = netten.haal_netten(gebied)
+    soorten = {s["id"]: s for s in net["soorten"]}
+    lengte = aanleg.afstanden(paren)[-1]
+    return {
+        **instelling.model_dump(mode="json"),
+        "lengte": round(lengte, 1),
+        "duur_uren": round(aanleg.duur_uren(lengte, instelling), 1),
+        "grondverzet_m3": round(aanleg.grondverzet_m3(lengte, instelling), 1),
+        "profiel": aanleg.profiel(paren, instelling),
+        "kruisingen": aanleg.kruisingen(paren, instelling, net["lagen"], soorten),
+        "min_tussenruimte": aanleg.MIN_TUSSENRUIMTE_M,
+    }
 
 
 def maak_app(settings: Settings | None = None) -> FastAPI:
@@ -228,30 +241,28 @@ def maak_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/api/aanleg")
     def aanleg_van_trace(
-        _: Ingelogd, punten: str, instellingen: Annotated[AanlegIn, Query()]
+        _: Ingelogd, punten: str, instelling: Annotated[aanleg.Aanleg, Query()]
     ) -> dict:
         """Profiel, duur, grondverzet en kruisingen met open netdata van het nieuwe tracé."""
-        paren = lees_punten(punten)
-        if len(paren) < 2:
-            raise HTTPException(status_code=400, detail="Geef minstens 2 punten.")
-        xs, ys = [x for x, _ in paren], [y for _, y in paren]
-        gebied = (min(xs) - 5, min(ys) - 5, max(xs) + 5, max(ys) + 5)
-        if max(gebied[2] - gebied[0], gebied[3] - gebied[1]) > wereld.MAX_ZIJDE_M:
-            raise HTTPException(status_code=400, detail="Het tracé is te lang voor de netcontrole.")
-        instelling = aanleg.Aanleg(**instellingen.model_dump())
-        # shortcut: haalt de netten opnieuw op; cachen als dit te traag wordt
-        net = netten.haal_netten(gebied)
-        soorten = {s["id"]: s for s in net["soorten"]}
-        lengte = aanleg.afstanden(paren)[-1]
-        return {
-            **instellingen.model_dump(),
-            "lengte": round(lengte, 1),
-            "duur_uren": round(aanleg.duur_uren(lengte, instelling), 1),
-            "grondverzet_m3": round(aanleg.grondverzet_m3(lengte, instelling), 1),
-            "profiel": aanleg.profiel(paren, instelling),
-            "kruisingen": aanleg.kruisingen(paren, instelling, net["lagen"], soorten),
-            "min_tussenruimte": aanleg.MIN_TUSSENRUIMTE_M,
-        }
+        return bereken_aanleg(lees_punten(punten), instelling)
+
+    @app.get("/api/aanleg/geojson")
+    def aanleg_als_geojson(
+        _: Ingelogd, punten: str, instelling: Annotated[aanleg.Aanleg, Query()], naam: str = "tracé"
+    ) -> Response:
+        """Het tracé met profiel, instellingen en kruisingen als GeoJSON-bestand (WGS84)."""
+        uitkomst = bereken_aanleg(lees_punten(punten), instelling)
+        profiel = uitkomst.pop("profiel")
+        kruisingen = uitkomst.pop("kruisingen")
+        profiel_ll = [[*kaart.rd_naar_wgs84(x, y), d] for x, y, d in profiel]
+        kruisingen_ll = [(kaart.rd_naar_wgs84(k["x"], k["y"]), k) for k in kruisingen]
+        data = aanleg.geojson(naam, profiel_ll, instelling, uitkomst, kruisingen_ll)
+        bestand = f"{export.bestandsnaam(naam).removesuffix('.kml')}-trace.geojson"
+        return Response(
+            json.dumps(data, ensure_ascii=False),
+            media_type="application/geo+json",
+            headers={"Content-Disposition": f'attachment; filename="{bestand}"'},
+        )
 
     @app.get("/api/projecten")
     def projecten_lijst(gebruiker: Ingelogd) -> list[Project]:

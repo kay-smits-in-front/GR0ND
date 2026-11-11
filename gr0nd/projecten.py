@@ -14,6 +14,8 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field, field_validator
 
+from gr0nd.aanleg import Aanleg
+
 MAX_GEBIED_KM2 = 100.0  # 10 × 10 km: groter laden we niet, om data en rekentijd klein te houden
 MAX_HOEKPUNTEN = 500
 MAX_TRACEPUNTEN = 200
@@ -36,6 +38,7 @@ class ProjectIn(BaseModel):
     naam: str = Field(min_length=1, max_length=80)
     gebied: list[tuple[float, float]] = Field(min_length=3, max_length=MAX_HOEKPUNTEN)
     trace: list[tuple[float, float]] = Field(default_factory=list, max_length=MAX_TRACEPUNTEN)
+    aanleg: Aanleg | None = None  # ontgraven of boren, met diepte, hoeken en snelheid
 
     @field_validator("naam")
     @classmethod

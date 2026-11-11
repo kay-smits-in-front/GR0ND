@@ -5,8 +5,9 @@ Bronnen: Netbeheer Nederland (0,5 m tussenruimte), boring Heemstede (intrede 10¬
 """
 
 import math
-from dataclasses import dataclass
 from enum import StrEnum
+
+from pydantic import BaseModel, ConfigDict, Field
 
 Punt = tuple[float, float]
 
@@ -20,19 +21,21 @@ class Wijze(StrEnum):
     BORING = "boring"
 
 
-@dataclass(frozen=True)
-class Aanleg:
+class Aanleg(BaseModel):
     """Instellingen van de aanleg. Standaardwaarden zijn indicatief; de engineer past ze aan.
 
     shortcut: een boring gaat recht onder de intrede- en uittredehoek, zonder boogstraal.
     """
 
+    model_config = ConfigDict(frozen=True)
+
     wijze: Wijze
-    diepte: float = 1.2
-    intrede_graden: float = 10.0
-    uittrede_graden: float = 10.0
-    sleuf_breedte: float = 0.6
-    snelheid_m_per_uur: float = 15.0  # graven ca. 100-150 m per werkdag, boren ca. 150 m
+    diepte: float = Field(1.2, ge=0.3, le=40)
+    intrede_graden: float = Field(10.0, ge=3, le=45)
+    uittrede_graden: float = Field(10.0, ge=3, le=45)
+    sleuf_breedte: float = Field(0.6, ge=0.2, le=3)
+    # graven ca. 100-150 m per werkdag, boren ca. 150 m
+    snelheid_m_per_uur: float = Field(15.0, gt=0, le=500)
 
 
 def duur_uren(lengte: float, aanleg: Aanleg) -> float:
@@ -126,3 +129,28 @@ def kruisingen(
                         "tussenruimte": round(ruimte, 2), "ok": ruimte >= MIN_TUSSENRUIMTE_M,
                     })  # fmt: skip
     return sorted(uit, key=lambda k: k["s"])
+
+
+def geojson(
+    naam: str, profiel_ll: list[list[float]], aanleg: Aanleg, uitkomst: dict, kruisingen_ll: list
+) -> dict:
+    """Trac√© en kruisingen als GeoJSON (WGS84). Diepte per hoekpunt staat in de eigenschappen."""
+    hoekpunten = [[lon, lat] for lon, lat, _ in profiel_ll]
+    lijn = {
+        "type": "Feature",
+        "geometry": {"type": "LineString", "coordinates": hoekpunten},
+        "properties": {
+            "naam": naam, **aanleg.model_dump(mode="json"), **uitkomst,
+            "diepte_per_punt_m": [d for *_, d in profiel_ll],
+            "let_op": "Indicatief ontwerp; diepte onder maaiveld. Geen vervanging van KLIC.",
+        },
+    }  # fmt: skip
+    punten = [
+        {
+            "type": "Feature",
+            "geometry": {"type": "Point", "coordinates": [lon, lat]},
+            "properties": {"soort": "kruising", **k},
+        }
+        for (lon, lat), k in kruisingen_ll
+    ]
+    return {"type": "FeatureCollection", "features": [lijn, *punten]}

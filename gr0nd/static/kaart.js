@@ -461,6 +461,7 @@ function zetWeergave(naam) {
   $("blok").hidden = !blokActief;
   $("blok-gereedschap").hidden = !blokActief;
   if (!blokActief) $("blok-legenda").hidden = true;
+  $("aanleg-paneel").hidden = !blokActief;
   $("paneel-overzicht").hidden = !overzichtActief;
   $("tab-overzicht").setAttribute("aria-pressed", overzichtActief);
   $("tab-blok").setAttribute("aria-pressed", blokActief);
@@ -543,22 +544,47 @@ function toonBlokLegenda(w, netten) {
   legenda.hidden = false;
 }
 
-/* Profiel en kruisingen van het tracé ophalen en in het blok tekenen. */
+/* ---------- aanleg: instellingen, uitkomst, animatie en export ---------- */
+
+const AANLEG_VELDEN = {
+  wijze: "aanleg-wijze", diepte: "aanleg-diepte", intrede_graden: "aanleg-intrede",
+  uittrede_graden: "aanleg-uittrede", sleuf_breedte: "aanleg-breedte", snelheid_m_per_uur: "aanleg-snelheid",
+};
+
+function leesAanleg() {
+  return Object.fromEntries(Object.entries(AANLEG_VELDEN).map(([sleutel, id]) => [sleutel, $(id).value]));
+}
+
+function zetAanlegVelden(aanleg) {
+  for (const [sleutel, id] of Object.entries(AANLEG_VELDEN)) if (aanleg?.[sleutel] != null) $(id).value = aanleg[sleutel];
+  toonWijzeVelden();
+}
+
+/* Alleen de velden die bij de gekozen wijze horen. */
+function toonWijzeVelden() {
+  const wijze = $("aanleg-wijze").value;
+  for (const veld of document.querySelectorAll("#aanleg-paneel [data-voor]")) veld.hidden = veld.dataset.voor !== wijze;
+}
+
+function aanlegVraag() {
+  const punten = staat.trace.rd.map(([x, y]) => `${x.toFixed(2)},${y.toFixed(2)}`).join(";");
+  return new URLSearchParams({ punten, ...leesAanleg() }).toString();
+}
+
+/* Profiel, duur en kruisingen van het tracé ophalen en in de wereld tekenen. */
 async function blokTraceToevoegen() {
-  const rd = staat.trace.rd;
   let lengte = 0;
   blokWeergave.wisTrace();
-  if (rd.length >= 2) {
-    const punten = rd.map(([x, y]) => `${x.toFixed(2)},${y.toFixed(2)}`).join(";");
-    const vraag = `punten=${punten}&wijze=${$("blok-wijze").value}&diepte=${$("blok-diepte").value}`;
+  staat.aanleg = null;
+  if (staat.trace.rd.length >= 2) {
     try {
-      const aanleg = await api(`/api/aanleg?${vraag}`);
-      lengte = blokWeergave.zetAanleg(aanleg);
-      toonAanleg(aanleg);
+      staat.aanleg = await api(`/api/aanleg?${aanlegVraag()}`);
+      lengte = blokWeergave.zetAanleg(staat.aanleg);
     } catch (fout) {
       toon(fout.message);
     }
   }
+  toonAanleg(staat.aanleg);
   const heeft = lengte > 0;
   for (const id of ["blok-volg", "blok-loop", "blok-positie", "blok-meter"]) $(id).hidden = !heeft;
   $("blok-positie").max = Math.floor(lengte);
@@ -568,13 +594,49 @@ async function blokTraceToevoegen() {
   $("blok-meter").textContent = "";
 }
 
+function uitkomstRegel(term, waarde) {
+  return [Object.assign(document.createElement("dt"), { textContent: term }), Object.assign(document.createElement("dd"), { textContent: waarde })];
+}
+
 function toonAanleg(aanleg) {
-  const wijze = aanleg.wijze === "boring" ? "gestuurde boring" : "ontgraven";
+  $("aanleg-start").disabled = !aanleg;
+  $("aanleg-export").hidden = !aanleg;
+  if (!aanleg) {
+    $("aanleg-uitkomst").replaceChildren(...uitkomstRegel("Tracé", "Teken een tracé in de wereld."));
+    return;
+  }
+  const naam = $("project-naam").value.trim() || "tracé";
+  $("aanleg-export").href = `/api/aanleg/geojson?${aanlegVraag()}&naam=${encodeURIComponent(naam)}`;
   const te_dicht = aanleg.kruisingen.filter((k) => !k.ok).length;
-  const kruis = aanleg.kruisingen.length
-    ? `${aanleg.kruisingen.length} kruisingen met bestaande kabels, ${te_dicht} te dicht (< ${nl(aanleg.min_tussenruimte, 1)} m).`
-    : "Geen kruisingen met open netdata.";
-  $("blok-info").textContent = `Tracé ${nl(aanleg.lengte, 0)} m, ${wijze}, ${nl(aanleg.diepte, 1)} m diep. ${kruis}`;
+  const dagen = aanleg.duur_uren / 8;
+  $("aanleg-uitkomst").replaceChildren(
+    ...uitkomstRegel("Lengte", `${nl(aanleg.lengte, 0)} m`),
+    ...uitkomstRegel("Duur", `${nl(aanleg.duur_uren, 1)} uur (${nl(dagen, 1)} werkdag${dagen === 1 ? "" : "en"} van 8 uur)`),
+    ...(aanleg.wijze === "ontgraven" ? uitkomstRegel("Grondverzet", `${nl(aanleg.grondverzet_m3, 0)} m³`) : []),
+    ...uitkomstRegel("Kruisingen", aanleg.kruisingen.length ? `${aanleg.kruisingen.length}, waarvan ${te_dicht} te dicht (< ${nl(aanleg.min_tussenruimte, 1)} m)` : "geen (open netdata)"),
+  );
+}
+
+function startAanleg() {
+  if (!staat.aanleg) return;
+  blokVolgenZetten(false);
+  blokWeergave.speelAanleg(staat.aanleg, (fractie, fase) => {
+    $("blok-meter").hidden = false;
+    $("blok-meter").textContent = `${fase}: uur ${nl(fractie * staat.aanleg.duur_uren, 1)} van ${nl(staat.aanleg.duur_uren, 1)}`;
+  });
+}
+
+function bindAanleg() {
+  $("aanleg-wijze").addEventListener("change", () => {
+    const boring = $("aanleg-wijze").value === "boring";
+    if (boring && Number($("aanleg-diepte").value) < 3) $("aanleg-diepte").value = 4;
+    if (!boring && Number($("aanleg-diepte").value) > 3) $("aanleg-diepte").value = 1.2;
+    toonWijzeVelden();
+    blokTraceToevoegen();
+  });
+  for (const id of Object.values(AANLEG_VELDEN).slice(1)) $(id).addEventListener("change", blokTraceToevoegen);
+  $("aanleg-start").addEventListener("click", startAanleg);
+  toonWijzeVelden();
 }
 
 /* Tracé getekend in het blok: bewaar het als het tracé van het project (RD en lengte/breedte). */
@@ -615,11 +677,6 @@ function bindBlokTrace() {
       $("blok-info").textContent = "Klik punten op het maaiveld. Dubbelklik of Enter: klaar. Esc: stoppen.";
     } else blokWeergave.stopTekenen();
   });
-  $("blok-wijze").addEventListener("change", () => {
-    if ($("blok-wijze").value === "boring" && Number($("blok-diepte").value) < 3) $("blok-diepte").value = 4;
-    blokTraceToevoegen();
-  });
-  $("blok-diepte").addEventListener("change", blokTraceToevoegen);
   addEventListener("keydown", (e) => e.key === "Escape" && $("blok-teken").setAttribute("aria-pressed", false));
   $("blok-volg").addEventListener("click", () => blokVolgenZetten($("blok-volg").getAttribute("aria-pressed") !== "true"));
   $("blok-positie").addEventListener("input", () => {
@@ -656,6 +713,7 @@ async function snijStukUit(bbox) {
 
 function bindBlok() {
   bindBlokTrace();
+  bindAanleg();
   $("tab-blok").addEventListener("click", openBlok);
   $("blok-doorzicht").addEventListener("input", () => blokWeergave?.zetDoorzicht(Number($("blok-doorzicht").value) / 100));
   $("blok-snijd").addEventListener("click", () => {
@@ -838,6 +896,7 @@ function projectInvoer() {
     naam: $("project-naam").value.trim(),
     gebied: gebied.punten.filter((c, i, alle) => i === 0 || c.join() !== alle[i - 1].join()),
     trace: staat.trace.ll,
+    aanleg: { ...leesAanleg() },
   };
 }
 
@@ -901,6 +960,7 @@ async function openProject(p) {
   projecten.grens3857 = [...naarMercator(grens[0][0] - ruimte, grens[0][1] - ruimte), ...naarMercator(grens[1][0] + ruimte, grens[1][1] + ruimte)];
   kaartObj.setMaxBounds([[grens[0][0] - ruimte, grens[0][1] - ruimte], [grens[1][0] + ruimte, grens[1][1] + ruimte]]);
   kaartObj.fitBounds(grens, { padding: 60, duration: 800 });
+  zetAanlegVelden(p.aanleg);
   await herstelTrace(p.trace);
   toonProjecten();
   laadProjectdata(false);

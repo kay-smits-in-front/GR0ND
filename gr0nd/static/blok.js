@@ -13,6 +13,10 @@ const DAKEN_SCHUIN = ["#b5533c", "#a2483a", "#5b5f66", "#7a4a35"];
 const DAK_PLAT = "#cfc8bb";
 const KROONKLEUREN = ["#4f8a3c", "#5c9a44", "#3f7a35", "#6aa64f"];
 const LUCHTFOTO = "https://service.pdok.nl/hwh/luchtfotorgb/wms/v1_0";
+const BLOKJE_M = 0.5; // grondblokjes bij het graven, zoals de voxels van GeoTOP
+const MAX_BLOKJES = 40000;
+const AANLEG_SPEELDUUR_MS = 24000; // de hele aanleg in beeld, de klok toont de echte werkuren
+const GROND = { humus: "#5a3d24", zand: ["#c8a466", "#b8955a", "#d1b07a"], open: "#2e2015", dicht: "#d8c08a" };
 const LUCHTFOTO_TEGEL_PX = 2048; // grootste afbeelding die PDOK per verzoek levert
 
 /* Vaste pseudo-toevalswaarde tussen 0 en 1, zodat de wereld er elke keer hetzelfde uitziet. */
@@ -115,6 +119,38 @@ function bouwGordijn(boven, onder, kleur) {
   });
   const materiaal = new THREE.MeshBasicMaterial({ color: kleur, transparent: true, opacity: 0.3, side: THREE.DoubleSide, depthWrite: false });
   return new THREE.Mesh(vulGeometrie(posities, null, index), materiaal);
+}
+
+/* Punten om de `stap` langs het profiel ([x, y, diepte] in RD): plek, diepte, afstand en de normaal (haaks). */
+function bemonster(profiel, stap) {
+  const uit = [];
+  let s = 0;
+  for (let i = 1; i < profiel.length; i++) {
+    const [[x0, y0, d0], [x1, y1, d1]] = [profiel[i - 1], profiel[i]];
+    const lengte = Math.hypot(x1 - x0, y1 - y0);
+    if (lengte < 1e-6) continue;
+    const [nx, ny] = [-(y1 - y0) / lengte, (x1 - x0) / lengte];
+    for (let a = uit.length ? stap - (s % stap || stap) : 0; a < lengte; a += stap) {
+      const t = a / lengte;
+      uit.push({ x: x0 + t * (x1 - x0), y: y0 + t * (y1 - y0), d: d0 + t * (d1 - d0), s: s + a, nx, ny });
+    }
+    s += lengte;
+  }
+  return uit;
+}
+
+/* Strook langs de punten met de gegeven breedte, net boven het maaiveld; volgorde langs het tracé. */
+function bouwStrook(punten, breedte, hoogte, naarScene, kleur) {
+  const posities = [];
+  const index = [];
+  punten.forEach((p, i) => {
+    for (const kant of [-0.5, 0.5]) {
+      const [x, y] = [p.x + p.nx * breedte * kant, p.y + p.ny * breedte * kant];
+      posities.push(...naarScene(x, y, hoogte(x, y) + 0.06).toArray());
+    }
+    if (i) index.push(2 * i - 2, 2 * i - 1, 2 * i, 2 * i, 2 * i - 1, 2 * i + 1);
+  });
+  return new THREE.Mesh(vulGeometrie(posities, null, index), new THREE.MeshBasicMaterial({ color: kleur, side: THREE.DoubleSide }));
 }
 
 export class BlokWeergave {
@@ -526,9 +562,123 @@ export class BlokWeergave {
   }
 
   wisTrace() {
+    this.animatie = null;
+    this.wisGroep("werk");
     this.wisGroep("trace");
     this.pad = null;
     this.zetVolgen(false);
+  }
+
+  /* ---------- aanleg in beeld: graven of boren ---------- */
+
+  /* Speel de aanleg af. `bijwerk(fractie, fase)` krijgt de voortgang (0 tot 1) en de naam van de fase. */
+  speelAanleg(aanleg, bijwerk) {
+    this.wisGroep("werk");
+    this.werk = new THREE.Group();
+    this.scene.add(this.werk);
+    const lengte = aanleg.lengte;
+    const bouw = aanleg.wijze === "boring" ? this.bouwBoring(aanleg) : this.bouwSleuf(aanleg);
+    if (this.trace) this.trace.visible = false;
+    this.animatie = { begin: performance.now(), lengte, bijwerk, ...bouw };
+  }
+
+  /* Sleuf: grondblokjes van 0,5 m die naar een hoop naast de sleuf gaan en er later weer in. */
+  bouwSleuf(aanleg) {
+    const breedte = aanleg.sleuf_breedte;
+    const kolommen = Math.max(1, Math.round(breedte / BLOKJE_M));
+    const lagen = Math.max(1, Math.ceil((aanleg.diepte + 0.1) / BLOKJE_M));
+    let stap = BLOKJE_M;
+    // shortcut: bij een heel lang tracé worden de blokjes per stap groter weergegeven, anders te zwaar
+    while ((aanleg.lengte / stap) * kolommen * lagen > MAX_BLOKJES) stap *= 2;
+    const punten = bemonster(aanleg.profiel, stap);
+    const aantal = punten.length * kolommen * lagen;
+    const blokjes = new THREE.InstancedMesh(new THREE.BoxGeometry(BLOKJE_M, BLOKJE_M, BLOKJE_M), new THREE.MeshStandardMaterial({ roughness: 1 }), aantal);
+    const reis = [];
+    punten.forEach((p, k) => {
+      const maaiveld = this.hoogte(p.x, p.y);
+      for (let laag = 0; laag < lagen; laag++) {
+        for (let kol = 0; kol < kolommen; kol++) {
+          const dwars = (kol - (kolommen - 1) / 2) * BLOKJE_M;
+          const q = laag * kolommen + kol;
+          const opzij = breedte / 2 + 0.4 + (q % 3) * BLOKJE_M;
+          const van = this.naarScene(p.x + p.nx * dwars, p.y + p.ny * dwars, maaiveld - 0.25 - laag * BLOKJE_M);
+          const naar = this.naarScene(p.x + p.nx * opzij, p.y + p.ny * opzij, this.hoogte(p.x + p.nx * opzij, p.y + p.ny * opzij) + 0.25 + Math.floor(q / 3) * BLOKJE_M);
+          const nr = reis.length;
+          blokjes.setColorAt(nr, new THREE.Color(laag === 0 ? GROND.humus : kies(GROND.zand, k, q)));
+          reis.push({ s: p.s, van, naar });
+        }
+      }
+    });
+    blokjes.castShadow = true;
+    const open = bouwStrook(punten, breedte, (x, y) => this.hoogte(x, y), (x, y, h) => this.naarScene(x, y, h), GROND.open);
+    const dicht = bouwStrook(punten, breedte, (x, y) => this.hoogte(x, y), (x, y, h) => this.naarScene(x, y, h), GROND.dicht);
+    const kabel = bouwBuis(aanleg.profiel.map(([x, y, d]) => this.naarScene(x, y, this.hoogte(x, y) - d)), 0.2, "#ff5a3c");
+    this.werk.add(blokjes, open, dicht, kabel);
+    return { soort: "sleuf", blokjes, reis, open, dicht, kabel, punten: punten.length };
+  }
+
+  /* Boring: bouwputten bij intrede en uittrede, een boorkop door de grond en daarna de ingetrokken leiding. */
+  bouwBoring(aanleg) {
+    const pad = aanleg.profiel.map(([x, y, d]) => this.naarScene(x, y, this.hoogte(x, y) - d));
+    const put = new THREE.MeshStandardMaterial({ color: GROND.open });
+    for (const [x, y] of [aanleg.profiel[0], aanleg.profiel.at(-1)]) {
+      const kuil = new THREE.Mesh(new THREE.BoxGeometry(3, 1.6, 2), put);
+      kuil.position.copy(this.naarScene(x, y, this.hoogte(x, y) - 0.75));
+      this.werk.add(kuil);
+    }
+    const boorgat = bouwBuis(pad, 0.3, "#6d5a45");
+    const leiding = bouwBuis(pad, 0.22, "#ff5a3c");
+    const kop = new THREE.Mesh(new THREE.ConeGeometry(0.6, 2, 12).rotateX(Math.PI / 2), new THREE.MeshStandardMaterial({ color: "#ffd23f", emissive: "#ffd23f", emissiveIntensity: 0.6 }));
+    this.werk.add(boorgat, leiding, kop);
+    return { soort: "boring", boorgat, leiding, kop, pad: { punten: pad, lengtes: padLengtes(pad) } };
+  }
+
+  /* Eén beeld van de animatie. Sleuf: 60% graven en kabel leggen, 40% dichtgooien. Boring: 70% boren, 30% intrekken. */
+  animeer(nu) {
+    const a = this.animatie;
+    const f = Math.min((nu - a.begin) / AANLEG_SPEELDUUR_MS, 1);
+    if (a.soort === "sleuf") this.animeerSleuf(a, f);
+    else this.animeerBoring(a, f);
+    if (f >= 1) this.animatie = null;
+  }
+
+  animeerSleuf(a, f) {
+    const voor = a.lengte * Math.min(f / 0.6, 1); // graaffront
+    const achter = a.lengte * Math.max((f - 0.6) / 0.4, 0); // dichtgooien
+    const m = new THREE.Matrix4();
+    const plek = new THREE.Vector3();
+    const weg = new THREE.Matrix4().makeScale(0, 0, 0);
+    a.reis.forEach((r, i) => {
+      const heen = Math.min(Math.max((voor - r.s) / 3, 0), 1); // over 3 m graaffront vliegt een blokje naar de hoop
+      const terug = Math.min(Math.max((achter - r.s) / 3, 0), 1);
+      if (heen === 0 || terug === 1) return a.blokjes.setMatrixAt(i, weg);
+      const t = terug > 0 ? 1 - terug : heen;
+      plek.lerpVectors(r.van, r.naar, t).setY(plek.y + 1.5 * Math.sin(Math.PI * t));
+      a.blokjes.setMatrixAt(i, m.makeTranslation(plek.x, plek.y, plek.z));
+    });
+    a.blokjes.instanceMatrix.needsUpdate = true;
+    const stroken = a.punten - 1;
+    const [i0, i1] = [Math.floor((achter / a.lengte) * stroken), Math.floor((voor / a.lengte) * stroken)];
+    a.open.geometry.setDrawRange(i0 * 6, Math.max(0, i1 - i0) * 6);
+    a.dicht.geometry.setDrawRange(0, i0 * 6);
+    a.kabel.geometry.setDrawRange(0, Math.floor(a.kabel.geometry.index.count * Math.max(0, voor - 5) / a.lengte / 3) * 3);
+    a.bijwerk?.(f, f < 0.6 ? "Graven en kabel leggen" : f < 1 ? "Dichtgooien" : "Klaar");
+  }
+
+  animeerBoring(a, f) {
+    const boor = Math.min(f / 0.7, 1);
+    const trek = Math.max((f - 0.7) / 0.3, 0);
+    const lengte = a.pad.lengtes.at(-1);
+    const vorig = this.pad;
+    this.pad = a.pad;
+    const { punt, richting } = this.plekOp(lengte * boor);
+    this.pad = vorig;
+    a.kop.position.copy(punt);
+    a.kop.lookAt(punt.clone().add(richting.lengthSq() ? richting : new THREE.Vector3(1, 0, 0)));
+    a.kop.visible = boor < 1;
+    a.boorgat.geometry.setDrawRange(0, Math.floor((a.boorgat.geometry.index.count * boor) / 3) * 3);
+    a.leiding.geometry.setDrawRange(0, Math.floor((a.leiding.geometry.index.count * trek) / 3) * 3);
+    a.bijwerk?.(f, f < 0.7 ? "Boren" : f < 1 ? "Leiding intrekken" : "Klaar");
   }
 
   /* ---------- langs het tracé lopen ---------- */
@@ -614,6 +764,7 @@ export class BlokWeergave {
     this.beweeg(Math.min((nu - (this.vorigBeeld ?? nu)) / 1000, 0.1));
     this.vorigBeeld = nu;
     if (this.speelt) this.loopStap();
+    if (this.animatie) this.animeer(nu);
     this.controls.update();
     this.zetSfeer();
     this.renderer.render(this.scene, this.camera);

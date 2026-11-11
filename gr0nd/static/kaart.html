@@ -97,19 +97,37 @@
         </form>
         <div id="blok" class="blok" aria-label="3D-wereld van het gebied" hidden></div>
         <aside id="blok-legenda" class="blok-legenda" aria-label="Legenda 3D-blok" hidden></aside>
+        <aside id="aanleg-paneel" class="aanleg-paneel" aria-label="Aanleg van het tracé" hidden>
+          <h3>Aanleg</h3>
+          <div class="velden">
+            <label for="aanleg-wijze">Wijze</label>
+            <select id="aanleg-wijze">
+              <option value="ontgraven">Ontgraven (sleuf)</option>
+              <option value="boring">Gestuurde boring</option>
+            </select>
+            <label for="aanleg-diepte">Diepte (m)</label>
+            <input id="aanleg-diepte" type="number" min="0.3" max="40" step="0.1" value="1.2" />
+            <label for="aanleg-intrede" data-voor="boring">Intredehoek (°)</label>
+            <input id="aanleg-intrede" data-voor="boring" type="number" min="3" max="45" step="1" value="10" />
+            <label for="aanleg-uittrede" data-voor="boring">Uittredehoek (°)</label>
+            <input id="aanleg-uittrede" data-voor="boring" type="number" min="3" max="45" step="1" value="10" />
+            <label for="aanleg-breedte" data-voor="ontgraven">Sleufbreedte (m)</label>
+            <input id="aanleg-breedte" data-voor="ontgraven" type="number" min="0.2" max="3" step="0.1" value="0.6" />
+            <label for="aanleg-snelheid">Snelheid (m/uur)</label>
+            <input id="aanleg-snelheid" type="number" min="1" max="500" step="1" value="15" />
+          </div>
+          <dl id="aanleg-uitkomst" class="uitkomst"><dt>Tracé</dt><dd>Teken een tracé in de wereld.</dd></dl>
+          <div class="knoppen">
+            <button id="aanleg-start" type="button" class="hoofd" disabled>Start aanleg</button>
+            <a id="aanleg-export" class="knop" href="#" download hidden>Exporteer GeoJSON</a>
+          </div>
+        </aside>
         <div id="blok-gereedschap" class="blok-gereedschap" hidden>
           <button id="blok-snijd" type="button" aria-pressed="false">Snijd stuk uit</button>
           <button id="blok-heel" type="button" disabled>Heel gebied</button>
           <label for="blok-doorzicht" class="zacht" title="Maak maaiveld en gebouwen doorzichtig om grond en kabels te zien">Doorzicht</label>
           <input id="blok-doorzicht" type="range" min="0" max="100" step="5" value="0" />
           <button id="blok-teken" type="button" aria-pressed="false" title="Klik punten op het maaiveld, dubbelklik of Enter om af te ronden">Teken tracé</button>
-          <label for="blok-wijze" class="verborgen">Aanleg</label>
-          <select id="blok-wijze" title="Aanleg">
-            <option value="ontgraven">Ontgraven</option>
-            <option value="boring">Gestuurde boring</option>
-          </select>
-          <label for="blok-diepte" class="zacht">Diepte (m)</label>
-          <input id="blok-diepte" type="number" min="0.3" max="40" step="0.1" value="1.2" />
           <button id="blok-volg" type="button" aria-pressed="false" hidden>Loop door het tracé</button>
           <button id="blok-loop" type="button" aria-pressed="false" hidden>Speel af</button>
           <label for="blok-positie" class="verborgen">Positie langs het tracé</label>
