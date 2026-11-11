@@ -11,7 +11,7 @@ Open-source Python-platform om kabels en leidingen in de Nederlandse bodem te to
 - `gr0nd/app.py` instellingen, routes, lokale start. `gr0nd/kaart.py` tracé, grondlagen, 0-zicht.
 - `gr0nd/ontwerp.py` leidingtypen, controles, checklist. `gr0nd/database.py`, `gebruikers.py`, `beheer.py`.
 - `gr0nd/static/` intro, login, kaart (HTML/CSS/JS, canvas 2D zonder library).
-- `docs/` onderzoek (export, stations en kabels, layout).
+- `docs/` onderzoek (doel en workflow, bronnen, 3D, export, stations en kabels, layout).
 
 ## Regels
 - Modern Python, één functie doet één ding, classes waar het past, Nederlandse namen en meldingen.
