@@ -101,6 +101,14 @@
           <button id="blok-snijd" type="button" aria-pressed="false">Snijd stuk uit</button>
           <button id="blok-heel" type="button" disabled>Heel gebied</button>
           <button id="blok-onder" type="button" aria-pressed="false" title="Terrein weg: kijk naar grond en kabels">Onder de grond</button>
+          <button id="blok-teken" type="button" aria-pressed="false" title="Klik punten op het maaiveld, dubbelklik of Enter om af te ronden">Teken tracé</button>
+          <label for="blok-wijze" class="verborgen">Aanleg</label>
+          <select id="blok-wijze" title="Aanleg">
+            <option value="ontgraven">Ontgraven</option>
+            <option value="boring">Gestuurde boring</option>
+          </select>
+          <label for="blok-diepte" class="zacht">Diepte (m)</label>
+          <input id="blok-diepte" type="number" min="0.3" max="40" step="0.1" value="1.2" />
           <button id="blok-volg" type="button" aria-pressed="false" hidden>Loop door het tracé</button>
           <button id="blok-loop" type="button" aria-pressed="false" hidden>Speel af</button>
           <label for="blok-positie" class="verborgen">Positie langs het tracé</label>

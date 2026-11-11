@@ -456,6 +456,15 @@ a.knop:hover {
   background: rgba(21, 24, 27, 0.94);
 }
 
+.blok-gereedschap {
+  flex-wrap: wrap;
+  max-width: calc(100% - 24px);
+}
+
+.blok-gereedschap input[type="number"] {
+  width: 64px;
+}
+
 .blok-gereedschap input[type="range"] {
   width: 160px;
   accent-color: var(--lijn);

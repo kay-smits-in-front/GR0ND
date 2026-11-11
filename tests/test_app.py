@@ -127,3 +127,21 @@ def test_blok_vraagt_inloggen_buiten_demo() -> None:
         TestClient(maak_app(Settings(omgeving="test"))).get("/api/blok", params=gebied).status_code
         == 401
     )
+
+
+def test_api_aanleg_geeft_profiel_en_kruisingen(monkeypatch) -> None:
+    from gr0nd import netten
+
+    lijn = {"soort": "ls", "beheerder": "Test", "lijnen": [[[136050, 454990], [136050, 455010]]]}
+    monkeypatch.setattr(
+        netten,
+        "haal_netten",
+        lambda gebied: {"soorten": [vars(netten.SOORTEN["ls"])], "lagen": [lijn]},
+    )
+    client = TestClient(maak_app(DEMO))
+    vraag = {"punten": "136000,455000;136100,455000", "wijze": "boring", "diepte": 4}
+    data = client.get("/api/aanleg", params=vraag).json()
+    assert data["lengte"] == 100 and data["profiel"][0][2] == 0
+    assert data["kruisingen"][0]["ok"] and data["kruisingen"][0]["s"] == 50
+    assert client.get("/api/aanleg", params=vraag | {"diepte": 99}).status_code == 400
+    assert client.get("/api/aanleg", params=vraag | {"wijze": "graven"}).status_code == 422

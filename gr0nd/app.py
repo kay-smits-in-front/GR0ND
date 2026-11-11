@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from gr0nd import export, geotop, kaart, netten, projectdata
+from gr0nd import aanleg, export, geotop, kaart, netten, projectdata
 from gr0nd.database import Database
 from gr0nd.gebruikers import SESSIE_DUUR, Gebruiker, Gebruikers, Rol, Sessies
 from gr0nd.projecten import Project, Projecten, ProjectIn
@@ -213,6 +213,32 @@ def maak_app(settings: Settings | None = None) -> FastAPI:
         if max(x1 - x0, y1 - y0) > kaart.BLOK_MAX_M:
             raise HTTPException(status_code=400, detail="Het gebied is te groot voor de netten.")
         return netten.haal_netten((x0, y0, x1, y1))
+
+    @app.get("/api/aanleg")
+    def aanleg_van_trace(
+        _: Ingelogd, punten: str, wijze: aanleg.Wijze, diepte: float = 1.2
+    ) -> dict:
+        """Profiel van de nieuwe leiding en de kruisingen met open netdata."""
+        paren = lees_punten(punten)
+        if len(paren) < 2 or not 0.3 <= diepte <= 40:
+            raise HTTPException(
+                status_code=400, detail="Geef minstens 2 punten en 0,3 tot 40 m diepte."
+            )
+        xs, ys = [x for x, _ in paren], [y for _, y in paren]
+        gebied = (min(xs) - 5, min(ys) - 5, max(xs) + 5, max(ys) + 5)
+        if max(gebied[2] - gebied[0], gebied[3] - gebied[1]) > kaart.BLOK_MAX_M:
+            raise HTTPException(status_code=400, detail="Het tracé is te lang voor de netcontrole.")
+        # shortcut: haalt de netten opnieuw op; cachen als dit te traag wordt
+        net = netten.haal_netten(gebied)
+        soorten = {s["id"]: s for s in net["soorten"]}
+        return {
+            "wijze": wijze,
+            "diepte": diepte,
+            "lengte": round(aanleg.afstanden(paren)[-1], 1),
+            "profiel": aanleg.profiel(paren, wijze, diepte),
+            "kruisingen": aanleg.kruisingen(paren, wijze, diepte, net["lagen"], soorten),
+            "min_tussenruimte": aanleg.MIN_TUSSENRUIMTE_M,
+        }
 
     @app.get("/api/projecten")
     def projecten_lijst(gebruiker: Ingelogd) -> list[Project]:

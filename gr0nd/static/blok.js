@@ -194,7 +194,7 @@ function bouwBuis(punten, straal, kleur) {
 }
 
 /* Doorschijnend gordijn tussen het tracé aan de oppervlakte en de leiding in de grond. */
-function bouwGordijn(boven, onder) {
+function bouwGordijn(boven, onder, kleur = "#e8a860") {
   const posities = [];
   const index = [];
   boven.forEach((p, i) => {
@@ -205,9 +205,9 @@ function bouwGordijn(boven, onder) {
   geometrie.setAttribute("position", new THREE.Float32BufferAttribute(posities, 3));
   geometrie.setIndex(index);
   const materiaal = new THREE.MeshBasicMaterial({
-    color: "#e8a860",
+    color: kleur,
     transparent: true,
-    opacity: 0.22,
+    opacity: 0.3,
     side: THREE.DoubleSide,
     depthWrite: false,
   });
@@ -368,6 +368,19 @@ export class BlokWeergave {
 
   bindSelectie() {
     const doek = this.renderer.domElement;
+    let neer = null;
+    doek.addEventListener("pointerdown", (e) => (neer = [e.clientX, e.clientY]));
+    doek.addEventListener("pointerup", (e) => {
+      const klik = neer && Math.hypot(e.clientX - neer[0], e.clientY - neer[1]) < 5;
+      const punt = klik && this.tekenen && this.grondPunt(e);
+      if (punt) this.voegTekenpuntToe(punt);
+    });
+    doek.addEventListener("dblclick", () => this.rondTekenenAf());
+    addEventListener("keydown", (e) => {
+      if (!this.tekenen) return;
+      if (e.key === "Enter") this.rondTekenenAf();
+      if (e.key === "Escape") this.stopTekenen();
+    });
     doek.addEventListener("pointerdown", (e) => {
       if (!this.selectie) return;
       this.selectie.start = this.grondPunt(e);
@@ -388,21 +401,66 @@ export class BlokWeergave {
     });
   }
 
-  /* Tracé (RD-punten) met de leiding op `diepteM` onder maaiveld. Geeft de lengte in meters. */
-  zetTrace(rd, diepteM) {
+  /* Tracé met de nieuwe leiding volgens het profiel van /api/aanleg ([x, y, diepte] in RD) en de kruisingen.
+     Ontgraven: bruine sleufwand; boring: oranje gordijn. Kruising: groene of rode bol op de bestaande kabel. */
+  zetAanleg(aanleg) {
     this.wisTrace();
-    if (!this.blok || rd.length < 2) return 0;
+    if (!this.blok || aanleg.profiel.length < 2) return 0;
     const [cx, cy] = this.verschuiving;
-    const breedte = this.breedte;
-    const straal = this.echt ? 0.15 : Math.max(breedte * 0.0004, 0.3);
-    const maaiveld = rd.map(([x, y]) => new THREE.Vector3(x - cx, straal, -(y - cy)));
-    const leiding = maaiveld.map((p) => new THREE.Vector3(p.x, -diepteM * this.schaalZ, p.z));
+    const straal = this.echt ? 0.15 : Math.max(this.breedte * 0.0004, 0.3);
+    const naarScene = (x, y, d) => new THREE.Vector3(x - cx, -d * this.schaalZ, -(y - cy));
+    const maaiveld = aanleg.profiel.map(([x, y]) => naarScene(x, y, -straal / this.schaalZ));
+    const leiding = aanleg.profiel.map(([x, y, d]) => naarScene(x, y, d));
+    const ontgraven = aanleg.wijze === "ontgraven";
     this.trace = new THREE.Group();
-    this.trace.add(bouwBuis(maaiveld, straal, "#ffb454"), bouwBuis(leiding, straal * 1.3, "#ff5a3c"));
-    this.trace.add(bouwGordijn(maaiveld, leiding));
+    this.trace.add(bouwBuis(maaiveld, straal, "#ffb454"), bouwBuis(leiding, straal * 1.6, "#ff5a3c"));
+    this.trace.add(bouwGordijn(maaiveld, leiding, ontgraven ? "#8a5a2b" : "#e8a860"));
+    const bol = new THREE.SphereGeometry(Math.max(straal * 4, this.breedte * 0.005), 16, 12);
+    for (const k of aanleg.kruisingen) {
+      const kleur = k.ok ? "#3ddc84" : "#ff3b3b";
+      const teken = new THREE.Mesh(bol, new THREE.MeshBasicMaterial({ color: kleur, depthTest: false, transparent: true }));
+      teken.position.copy(naarScene(k.x, k.y, k.kabel_diepte));
+      teken.renderOrder = 6;
+      this.trace.add(teken);
+    }
     this.scene.add(this.trace);
     this.pad = { punten: maaiveld, lengtes: padLengtes(maaiveld) };
     return this.pad.lengtes.at(-1);
+  }
+
+  /* Tracé tekenen in 3D: klik punten op het maaiveld, dubbelklik of Enter om af te ronden, Esc om te stoppen.
+     `klaar` krijgt de RD-punten. */
+  tekenTrace(klaar) {
+    this.annuleerKeuze();
+    this.tekenen = { klaar, punten: [], voorbeeld: null };
+    this.renderer.domElement.style.cursor = "crosshair";
+  }
+
+  stopTekenen() {
+    if (this.tekenen?.voorbeeld) this.scene.remove(this.tekenen.voorbeeld);
+    this.tekenen = null;
+    this.renderer.domElement.style.cursor = "";
+  }
+
+  voegTekenpuntToe(punt) {
+    const t = this.tekenen;
+    t.punten.push(punt);
+    if (t.voorbeeld) this.scene.remove(t.voorbeeld);
+    if (t.punten.length < 2) return;
+    const straal = this.echt ? 0.3 : Math.max(this.breedte * 0.0008, 0.6);
+    t.voorbeeld = bouwBuis(t.punten.map((p) => new THREE.Vector3(p.x, straal, -p.y)), straal, "#ffb454");
+    this.scene.add(t.voorbeeld);
+  }
+
+  rondTekenenAf() {
+    const t = this.tekenen;
+    if (!t) return;
+    const [cx, cy] = this.verschuiving;
+    // een dubbelklik zet het laatste punt twee keer: punten dichter dan 0,5 m bij de vorige vallen weg
+    const punten = t.punten.filter((p, i) => !i || Math.hypot(p.x - t.punten[i - 1].x, p.y - t.punten[i - 1].y) > 0.5);
+    const rd = punten.map((p) => [p.x + cx, p.y + cy]);
+    this.stopTekenen();
+    if (rd.length >= 2) t.klaar(rd);
   }
 
   wisTrace() {
@@ -495,7 +553,7 @@ export class BlokWeergave {
     const b = this.breedte ?? 1000;
     this.scene.background = this.ondergronds ? new THREE.Color(ONDER) : this.lucht;
     this.scene.fog = this.ondergronds
-      ? new THREE.Fog(ONDER, b * 0.6, b * 3)
+      ? new THREE.Fog(ONDER, b * 2.5, b * 8)
       : new THREE.Fog(LUCHT.horizon, b * 2.5, b * 9);
   }
 
@@ -584,6 +642,7 @@ export class BlokWeergave {
   }
 
   leegmaken() {
+    this.stopTekenen();
     this.wisOmgeving();
     this.wisNetten();
     this.wisTrace();

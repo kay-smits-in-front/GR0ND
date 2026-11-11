@@ -549,16 +549,29 @@ function toonBlokLegenda(ondergrond, netten) {
     if (!aanwezig.size) lijst.append(legendaRegel("transparent", "Geen open netdata in dit gebied"));
     const bronnen = [...new Set(netten.lagen.filter((l) => l.lijnen.length).map((l) => l.beheerder))].join(", ");
     const bron = Object.assign(document.createElement("p"), { className: "zacht", textContent: `${bronnen ? `Bron: ${bronnen}. ` : ""}${netten.let_op}` });
+    lijst.append(legendaRegel("#3ddc84", "Kruising met genoeg ruimte"), legendaRegel("#ff3b3b", "Kruising te dicht"));
     legenda.append(Object.assign(document.createElement("h3"), { textContent: "Kabels en leidingen" }), lijst, bron);
   }
   legenda.append(Object.assign(document.createElement("p"), { className: "zacht", textContent: "Lopen: WASD, omhoog/omlaag: E/Q, sneller: Shift." }));
   legenda.hidden = false;
 }
 
-const LEIDING_DIEPTE_M = 1.2;
-
-function blokTraceToevoegen() {
-  const lengte = blokWeergave.zetTrace(staat.trace.rd, LEIDING_DIEPTE_M);
+/* Profiel en kruisingen van het tracé ophalen en in het blok tekenen. */
+async function blokTraceToevoegen() {
+  const rd = staat.trace.rd;
+  let lengte = 0;
+  blokWeergave.wisTrace();
+  if (rd.length >= 2) {
+    const punten = rd.map(([x, y]) => `${x.toFixed(2)},${y.toFixed(2)}`).join(";");
+    const vraag = `punten=${punten}&wijze=${$("blok-wijze").value}&diepte=${$("blok-diepte").value}`;
+    try {
+      const aanleg = await api(`/api/aanleg?${vraag}`);
+      lengte = blokWeergave.zetAanleg(aanleg);
+      toonAanleg(aanleg);
+    } catch (fout) {
+      toon(fout.message);
+    }
+  }
   const heeft = lengte > 0;
   for (const id of ["blok-volg", "blok-loop", "blok-positie", "blok-meter"]) $(id).hidden = !heeft;
   $("blok-positie").max = Math.floor(lengte);
@@ -566,6 +579,28 @@ function blokTraceToevoegen() {
   $("blok-volg").setAttribute("aria-pressed", false);
   $("blok-loop").setAttribute("aria-pressed", false);
   $("blok-meter").textContent = "";
+}
+
+function toonAanleg(aanleg) {
+  const wijze = aanleg.wijze === "boring" ? "gestuurde boring" : "ontgraven";
+  const te_dicht = aanleg.kruisingen.filter((k) => !k.ok).length;
+  const kruis = aanleg.kruisingen.length
+    ? `${aanleg.kruisingen.length} kruisingen met bestaande kabels, ${te_dicht} te dicht (< ${nl(aanleg.min_tussenruimte, 1)} m).`
+    : "Geen kruisingen met open netdata.";
+  $("blok-info").textContent = `Tracé ${nl(aanleg.lengte, 0)} m, ${wijze}, ${nl(aanleg.diepte, 1)} m diep. ${kruis}`;
+}
+
+/* Tracé getekend in het blok: bewaar het als het tracé van het project (RD en lengte/breedte). */
+async function blokTraceGetekend(rd) {
+  $("blok-teken").setAttribute("aria-pressed", false);
+  try {
+    const ll = await Promise.all(rd.map(([x, y]) => api(`/api/wgs84?x=${x}&y=${y}`)));
+    staat.trace = { ll: ll.map((p) => [p.lon, p.lat]), rd, tekenen: false };
+    traceVeranderd();
+    await blokTraceToevoegen();
+  } catch (fout) {
+    toon(fout.message);
+  }
 }
 
 function blokPositieTonen(afstand) {
@@ -584,6 +619,21 @@ function blokVolgenZetten(aan) {
 }
 
 function bindBlokTrace() {
+  $("blok-teken").addEventListener("click", () => {
+    const aan = $("blok-teken").getAttribute("aria-pressed") !== "true";
+    $("blok-teken").setAttribute("aria-pressed", aan);
+    if (aan) {
+      blokKiezenZetten(false);
+      blokWeergave.tekenTrace(blokTraceGetekend);
+      $("blok-info").textContent = "Klik punten op het maaiveld. Dubbelklik of Enter: klaar. Esc: stoppen.";
+    } else blokWeergave.stopTekenen();
+  });
+  $("blok-wijze").addEventListener("change", () => {
+    if ($("blok-wijze").value === "boring" && Number($("blok-diepte").value) < 3) $("blok-diepte").value = 4;
+    blokTraceToevoegen();
+  });
+  $("blok-diepte").addEventListener("change", blokTraceToevoegen);
+  addEventListener("keydown", (e) => e.key === "Escape" && $("blok-teken").setAttribute("aria-pressed", false));
   $("blok-volg").addEventListener("click", () => blokVolgenZetten($("blok-volg").getAttribute("aria-pressed") !== "true"));
   $("blok-positie").addEventListener("input", () => {
     blokVolgenZetten(true);
