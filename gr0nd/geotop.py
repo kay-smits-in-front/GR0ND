@@ -110,7 +110,7 @@ WAND_DIEPTE_M = 25.0
 
 
 def wand(gebied: tuple[float, float, float, float], zijde: str, ophalen: Ophaler) -> Uitsnede:
-    """De voxels langs één zijde (zuid, noord, west, oost), met een halve voxel extra aan elk eind."""
+    """De voxels langs één zijde (zuid, noord, west, oost), plus een halve voxel aan elk eind."""
     x0, y0, x1, y1 = gebied
     half = STAP_XY / 2
     strook = {
