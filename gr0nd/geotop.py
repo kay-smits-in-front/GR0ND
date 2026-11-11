@@ -102,3 +102,63 @@ def haal_uitsnede(
         z=Z0 + STAP_Z * np.array(iz),
         lithok=lithok,
     )
+
+
+ZIJDEN = ("zuid", "noord", "west", "oost")
+# shortcut: wanden tot 25 m onder maaiveld (genoeg voor kabels en boringen); dieper als nodig
+WAND_DIEPTE_M = 25.0
+
+
+def wand(gebied: tuple[float, float, float, float], zijde: str, ophalen: Ophaler) -> Uitsnede:
+    """De voxels langs één zijde (zuid, noord, west, oost), met een halve voxel extra aan elk eind."""
+    x0, y0, x1, y1 = gebied
+    half = STAP_XY / 2
+    strook = {
+        "zuid": (x0 - half, y0 - half, x1 + half, y0 + half - 1e-6),
+        "noord": (x0 - half, y1 - half, x1 + half, y1 + half - 1e-6),
+        "west": (x0 - half, y0 - half, x0 + half - 1e-6, y1 + half),
+        "oost": (x1 - half, y0 - half, x1 + half - 1e-6, y1 + half),
+    }[zijde]
+    return haal_uitsnede(strook, (Z0, Z0 + STAP_Z * (AANTAL_Z - 1)), ophalen)
+
+
+def maaiveld(kolom: np.ndarray) -> float | None:
+    """NAP-hoogte van de bovenkant van de hoogste voxel met grond, of None als er geen grond is."""
+    grond = np.flatnonzero(kolom != GEEN_DATA)
+    return None if grond.size == 0 else Z0 + STAP_Z * grond[-1] + STAP_Z / 2
+
+
+def wand_json(uitsnede: Uitsnede, zijde: str) -> dict:
+    """Kolommen van een wand, van maaiveld naar beneden, tot WAND_DIEPTE_M diep."""
+    langs_x = zijde in ("zuid", "noord")
+    rij = uitsnede.lithok[:, 0, :] if langs_x else uitsnede.lithok[0, :, :]
+    posities = uitsnede.x if langs_x else uitsnede.y
+    lagen = int(WAND_DIEPTE_M / STAP_Z)
+    kolommen = []
+    for kolom in rij:
+        boven = maaiveld(kolom)
+        if boven is None:
+            kolommen.append({"maaiveld": None, "lithok": []})
+            continue
+        top = int(round((boven - STAP_Z / 2 - Z0) / STAP_Z))
+        stuk = kolom[max(0, top - lagen + 1) : top + 1][::-1]
+        kolommen.append({"maaiveld": boven, "lithok": stuk.tolist()})
+    return {"posities": posities.tolist(), "kolommen": kolommen}
+
+
+def wanden(gebied: tuple[float, float, float, float], ophalen: Ophaler = haal_tekst) -> dict:
+    """De vier wanden van het blok uit GeoTOP, met klassen en de maaiveldhoogte als referentie."""
+    zijden = {zijde: wand_json(wand(gebied, zijde, ophalen), zijde) for zijde in ZIJDEN}
+    hoogtes = [
+        k["maaiveld"] for z in zijden.values() for k in z["kolommen"] if k["maaiveld"] is not None
+    ]
+    if not hoogtes:
+        raise ValueError("GeoTOP heeft hier geen grond (water of buiten het model).")
+    return {
+        "bron": "GeoTOP 1.6.1 (TNO), voxels 100 × 100 × 0,5 m",
+        "referentie_nap": float(np.median(hoogtes)),
+        "stap_z": STAP_Z,
+        "half": STAP_XY / 2,
+        "klassen": [{"code": k.code, "naam": k.naam, "kleur": k.kleur} for k in LITHOKLASSEN],
+        "zijden": zijden,
+    }

@@ -658,3 +658,44 @@ a.knop:hover {
   font-variant-numeric: tabular-nums;
   text-align: right;
 }
+
+.blok-legenda {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  max-width: 280px;
+  padding: 8px 12px;
+  border: 1px solid var(--rand);
+  border-radius: var(--straal);
+  background: rgba(21, 24, 27, 0.94);
+  font-size: 13px;
+}
+
+.blok-legenda h3 {
+  margin: 4px 0;
+  font-size: 13px;
+}
+
+.blok-legenda ul {
+  margin: 0 0 8px;
+  padding: 0;
+  list-style: none;
+}
+
+.blok-legenda li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  line-height: 20px;
+}
+
+.legenda-kleur {
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+  flex: none;
+}
+
+.blok-legenda p {
+  margin: 4px 0;
+}

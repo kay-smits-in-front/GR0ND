@@ -15,7 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from gr0nd import export, kaart, ontwerp, projectdata
+from gr0nd import export, geotop, kaart, netten, ontwerp, projectdata
 from gr0nd.database import Database
 from gr0nd.gebruikers import SESSIE_DUUR, Gebruiker, Gebruikers, Rol, Sessies
 from gr0nd.projecten import Project, Projecten, ProjectIn
@@ -218,6 +218,23 @@ def maak_app(settings: Settings | None = None) -> FastAPI:
             return kaart.blok(x0, y0, x1, y1, n)
         except ValueError as fout:
             raise HTTPException(status_code=400, detail=str(fout)) from fout
+
+    @app.get("/api/ondergrond")
+    def ondergrond(_: Ingelogd, x0: float, y0: float, x1: float, y1: float) -> dict:
+        """Echte grondsoorten (GeoTOP) op de vier wanden van het blok."""
+        try:
+            return geotop.wanden((x0, y0, x1, y1))
+        except ValueError as fout:
+            raise HTTPException(status_code=400, detail=str(fout)) from fout
+        except OSError as fout:
+            raise HTTPException(status_code=502, detail="GeoTOP is nu niet bereikbaar.") from fout
+
+    @app.get("/api/netten")
+    def netten_in_gebied(_: Ingelogd, x0: float, y0: float, x1: float, y1: float) -> dict:
+        """Echte kabels en leidingen uit open data van netbeheerders (zonder diepte)."""
+        if max(x1 - x0, y1 - y0) > kaart.BLOK_MAX_M:
+            raise HTTPException(status_code=400, detail="Het gebied is te groot voor de netten.")
+        return netten.haal_netten((x0, y0, x1, y1))
 
     @app.get("/api/profiel")
     def profiel(_: Ingelogd, punten: str, s: float = 0.0) -> dict:

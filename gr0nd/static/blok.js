@@ -1,6 +1,6 @@
-/* 3D-blok van een projectgebied: bovenvlak met de bodemlagen als doorsnede aan de vier zijkanten.
-   Gladde, geschilderde stijl (vaste kleuren, zachte schaduw per zijde), geen blokjes.
-   Bodemlagen komen van /api/blok en zijn voorbeelddata. Draaien: slepen, zoomen: scrollen. */
+/* 3D-blok van een projectgebied: echte grond (GeoTOP) op de wanden, echte netten (open data) in de grond,
+   PDOK 3D (terrein, gebouwen) erop. Zonder GeoTOP vallen de wanden terug op voorbeelddata van /api/blok.
+   Kijken: slepen, zoomen: scrollen, lopen: WASD, omhoog/omlaag: E/Q, sneller: Shift. */
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/OrbitControls.js";
 import { DRACOLoader } from "three/addons/loaders/DRACOLoader.js";
@@ -66,6 +66,68 @@ function bouwZijde(data, naam, schaalZ) {
   geometrie.setAttribute("color", new THREE.Float32BufferAttribute(kleuren, 3));
   geometrie.setIndex(index);
   return new THREE.Mesh(geometrie, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide }));
+}
+
+/* Wand uit GeoTOP-kolommen: per voxel van 0,5 m een rechthoek in de kleur van de grondsoort. */
+function bouwVoxelWand(og, naam, gebied, [cx, cy], schaalZ) {
+  const [x0, y0, x1, y1] = gebied;
+  const langsX = naam === "zuid" || naam === "noord";
+  const [a0, a1] = langsX ? [x0, x1] : [y0, y1];
+  const vast = { zuid: y0, noord: y1, west: x0, oost: x1 }[naam];
+  const punt = (l, h) => (langsX ? [l - cx, h, -(vast - cy)] : [vast - cx, h, -(l - cy)]);
+  const kleurVan = Object.fromEntries(og.klassen.map((k) => [k.code, k.kleur]));
+  const posities = [];
+  const kleuren = [];
+  const zijde = og.zijden[naam];
+  zijde.posities.forEach((pos, i) => {
+    const kolom = zijde.kolommen[i];
+    const [l0, l1] = [Math.max(a0, pos - og.half), Math.min(a1, pos + og.half)];
+    if (kolom.maaiveld === null || l1 <= l0) return;
+    kolom.lithok.forEach((code, j) => {
+      if (code === -127) return;
+      const boven = (kolom.maaiveld - j * og.stap_z - og.referentie_nap) * schaalZ;
+      const onder = boven - og.stap_z * schaalZ;
+      const kleur = mengKleur(kleurVan[code] ?? "#777777", ZIJDEN_SCHADUW[naam]);
+      for (const [l, h] of [[l0, boven], [l0, onder], [l1, boven], [l1, boven], [l0, onder], [l1, onder]]) {
+        posities.push(...punt(l, h));
+        kleuren.push(kleur.r, kleur.g, kleur.b);
+      }
+    });
+  });
+  const geometrie = new THREE.BufferGeometry();
+  geometrie.setAttribute("position", new THREE.Float32BufferAttribute(posities, 3));
+  geometrie.setAttribute("color", new THREE.Float32BufferAttribute(kleuren, 3));
+  return new THREE.Mesh(geometrie, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide }));
+}
+
+/* Echte kabels en leidingen als buizen op hun indicatieve diepte, gekleurd per soort. */
+function bouwNetten(netten, [cx, cy], schaalZ, straal) {
+  const soorten = Object.fromEntries(netten.soorten.map((s) => [s.id, s]));
+  const groep = new THREE.Group();
+  for (const laag of netten.lagen) {
+    const soort = soorten[laag.soort];
+    const materiaal = new THREE.MeshStandardMaterial({ color: soort.kleur, emissive: soort.kleur, emissiveIntensity: 0.35 });
+    for (const lijn of laag.lijnen) {
+      if (lijn.length < 2) continue;
+      const punten = lijn.map(([x, y]) => new THREE.Vector3(x - cx, -soort.diepte_m * schaalZ, -(y - cy)));
+      const buis = bouwBuis(punten, straal, soort.kleur);
+      buis.material.dispose();
+      buis.material = materiaal;
+      groep.add(buis);
+    }
+  }
+  return groep;
+}
+
+/* Doorschijnende grond tussen de wanden, zodat kabels zichtbaar in de grond liggen. */
+function bouwGrondvolume(gebiedLokaal, dikte) {
+  const [x0, z0, x1, z1] = gebiedLokaal;
+  const volume = new THREE.Mesh(
+    new THREE.BoxGeometry(x1 - x0, dikte, z1 - z0),
+    new THREE.MeshBasicMaterial({ color: "#7a5a36", transparent: true, opacity: 0.28, depthWrite: false, side: THREE.DoubleSide }),
+  );
+  volume.position.set((x0 + x1) / 2, -dikte / 2 - 0.05, (z0 + z1) / 2);
+  return volume;
 }
 
 function bouwBovenvlak(data) {
@@ -177,10 +239,16 @@ export class BlokWeergave {
     this.verschuiving = [0, 0];
     this.selectie = null;
     this.bindSelectie();
+    this.toetsen = new Set();
+    addEventListener("keydown", (e) => {
+      if (this.actief && !e.target.closest?.("input, textarea, select")) this.toetsen.add(e.code);
+    });
+    addEventListener("keyup", (e) => this.toetsen.delete(e.code));
+    addEventListener("blur", () => this.toetsen.clear());
     new ResizeObserver(() => this.pasMaatAan()).observe(houder);
   }
 
-  toon(data, echt = false) {
+  toon(data, echt = false, ondergrond = null) {
     this.leegmaken();
     const [gx0, gy0, gx1, gy1] = data.gebied;
     const [cx, cy] = [(gx0 + gx1) / 2, (gy0 + gy1) / 2];
@@ -194,7 +262,17 @@ export class BlokWeergave {
     this.midden = data.midden;
     this.schaalZ = echt ? 1 : overdrijving(breedte, data.diepte);
     this.blok = new THREE.Group();
-    for (const naam of Object.keys(ZIJDEN_SCHADUW)) this.blok.add(bouwZijde(data, naam, this.schaalZ));
+    for (const naam of Object.keys(ZIJDEN_SCHADUW)) {
+      this.blok.add(
+        ondergrond
+          ? bouwVoxelWand(ondergrond, naam, [gx0, gy0, gx1, gy1], this.verschuiving, this.schaalZ)
+          : bouwZijde(data, naam, this.schaalZ),
+      );
+    }
+    if (ondergrond) {
+      const lagen = Math.max(...Object.values(ondergrond.zijden).flatMap((z) => z.kolommen.map((k) => k.lithok.length)));
+      this.blok.add(bouwGrondvolume(this.gebiedLokaal, lagen * ondergrond.stap_z * this.schaalZ));
+    }
     this.bovenvlak = bouwBovenvlak(data);
     this.blok.add(this.bovenvlak);
     this.scene.add(this.blok);
@@ -356,6 +434,50 @@ export class BlokWeergave {
     this.laatste = performance.now();
   }
 
+  zetNetten(netten) {
+    this.wisNetten();
+    if (!this.blok) return;
+    const straal = this.echt ? 0.2 : Math.max(this.breedte * 0.0005, 0.3);
+    this.netten = bouwNetten(netten, this.verschuiving, this.schaalZ, straal);
+    this.scene.add(this.netten);
+  }
+
+  wisNetten() {
+    if (!this.netten) return;
+    this.scene.remove(this.netten);
+    this.netten.traverse((o) => {
+      o.geometry?.dispose();
+      o.material?.dispose();
+    });
+    this.netten = null;
+  }
+
+  /* Onder de grond kijken: terrein en grasvlak weg, camera mag onder het maaiveld. Gebouwen blijven staan. */
+  zetOndergronds(aan) {
+    this.ondergronds = aan;
+    if (this.tegels?.[0]) this.tegels[0].group.visible = !aan;
+    if (this.bovenvlak) this.bovenvlak.visible = !aan && !this.hoogteGekalibreerd;
+    this.controls.maxPolarAngle = aan ? Math.PI : Math.PI * 0.47;
+  }
+
+  /* Lopen zoals in een spel: WASD langs de grond in de kijkrichting, E/Q omhoog en omlaag. */
+  beweeg(seconden) {
+    if (!this.toetsen.size || this.volgen) return;
+    const t = this.toetsen;
+    const vooruit = (t.has("KeyW") || t.has("ArrowUp")) - (t.has("KeyS") || t.has("ArrowDown"));
+    const opzij = (t.has("KeyD") || t.has("ArrowRight")) - (t.has("KeyA") || t.has("ArrowLeft"));
+    const omhoog = t.has("KeyE") - t.has("KeyQ");
+    if (!vooruit && !opzij && !omhoog) return;
+    const kijk = new THREE.Vector3();
+    this.camera.getWorldDirection(kijk).setY(0).normalize();
+    const rechts = new THREE.Vector3().crossVectors(kijk, this.camera.up).normalize();
+    const snelheid = Math.max(8, this.breedte * 0.15) * (t.has("ShiftLeft") || t.has("ShiftRight") ? 4 : 1);
+    const stap = kijk.multiplyScalar(vooruit).add(rechts.multiplyScalar(opzij)).setY(omhoog);
+    stap.multiplyScalar(snelheid * seconden);
+    this.camera.position.add(stap);
+    this.controls.target.add(stap);
+  }
+
   /* Echte omgeving: PDOK 3D Tiles (terrein en gebouwen), afgeknipt tot het blok. Alleen voor kleine gebieden. */
   laadOmgeving(bronnen = OMGEVING_BRONNEN, melding = () => {}) {
     this.wisOmgeving();
@@ -377,7 +499,7 @@ export class BlokWeergave {
       const tegels = maakTegels(url, matrix, this.dracoLoader, this.camera, this.renderer, 8);
       tegels.addEventListener("load-error", (e) => {
         console.warn(`PDOK ${naam}:`, e.error?.message ?? e);
-        this.melding(`PDOK 3D ${naam} laden mislukt: ${e.error?.message ?? "onbekende fout"}. Het blok toont voorbeelddata.`);
+        this.melding(`PDOK 3D ${naam} laden mislukt: ${e.error?.message ?? "onbekende fout"}. Open het blok opnieuw om het nog eens te proberen.`);
       });
       this.omgeving.add(tegels.group);
       return tegels;
@@ -395,6 +517,7 @@ export class BlokWeergave {
     this.omgeving.position.y -= treffer.point.y;
     this.hoogteGekalibreerd = true;
     if (this.bovenvlak) this.bovenvlak.visible = false;
+    if (this.ondergronds) this.tegels[0].group.visible = false;
     this.melding("PDOK 3D-terrein geladen. Gebouwen laden mee.");
   }
 
@@ -409,6 +532,7 @@ export class BlokWeergave {
 
   leegmaken() {
     this.wisOmgeving();
+    this.wisNetten();
     this.wisTrace();
     this.annuleerKeuze();
     if (!this.blok) return;
@@ -445,6 +569,9 @@ export class BlokWeergave {
 
   lus() {
     if (!this.actief) return;
+    const nu = performance.now();
+    this.beweeg(Math.min((nu - (this.vorigBeeld ?? nu)) / 1000, 0.1));
+    this.vorigBeeld = nu;
     if (this.speelt) this.loopStap();
     this.controls.update();
     this.camera.updateMatrixWorld();

@@ -1382,6 +1382,7 @@ function zetWeergave(naam) {
   $("zicht").hidden = !zichtActief;
   $("blok").hidden = !blokActief;
   $("blok-gereedschap").hidden = !blokActief;
+  if (!blokActief) $("blok-legenda").hidden = true;
   $("paneel-overzicht").hidden = !overzichtActief;
   $("paneel-zicht").hidden = !zichtActief;
   $("positie").hidden = !zichtActief;
@@ -1419,21 +1420,66 @@ const ECHT_MAX_M = 600; // groter dan dit laden we de PDOK 3D-tiles niet: eerst 
 
 async function haalBlok(bbox) {
   const [x0, y0, x1, y1] = bbox;
-  const data = await api(`/api/blok?x0=${x0}&y0=${y0}&x1=${x1}&y1=${y1}&n=64`);
+  const vraag = `x0=${x0}&y0=${y0}&x1=${x1}&y1=${y1}`;
   const breedte = Math.round(x1 - x0);
   const diepte = Math.round(y1 - y0);
   const echt = Math.max(breedte, diepte) <= ECHT_MAX_M;
-  const schaal = blokWeergave.toon(data, echt);
-  const maat = `3D-blok ${nl(breedte, 0)} × ${nl(diepte, 0)} m, 50 m diep.`;
+  $("balk-info").textContent = "Echte grond (GeoTOP) en netten worden opgehaald…";
+  const [data, ondergrond, netten] = await Promise.all([
+    api(`/api/blok?${vraag}&n=64`),
+    api(`/api/ondergrond?${vraag}`).catch((fout) => (toon(`${fout.message} Wanden: voorbeelddata.`), null)),
+    // shortcut: netten alleen in een echt blok (≤ ECHT_MAX_M); groter wordt te zwaar als buizen
+    echt ? api(`/api/netten?${vraag}`).catch((fout) => (toon(fout.message), null)) : null,
+  ]);
+  const schaal = blokWeergave.toon(data, echt, ondergrond);
+  if (netten) blokWeergave.zetNetten(netten);
+  blokWeergave.zetOndergronds($("blok-onder").getAttribute("aria-pressed") === "true");
+  toonBlokLegenda(ondergrond, netten);
+  const grond = ondergrond ? "Grond: GeoTOP (TNO)." : "Grond: voorbeelddata.";
+  const maat = `3D-blok ${nl(breedte, 0)} × ${nl(diepte, 0)} m. ${grond}`;
   if (echt) {
-    const toon = (tekst) => ($("balk-info").textContent = `${maat} ${tekst} Bodemlagen: voorbeelddata.`);
-    blokWeergave.laadOmgeving(undefined, toon);
-    toon("PDOK 3D (gebouwen, terrein) wordt geladen…");
+    const toonInfo = (tekst) => ($("balk-info").textContent = `${maat} ${tekst}`);
+    blokWeergave.laadOmgeving(undefined, toonInfo);
+    toonInfo("PDOK 3D (gebouwen, terrein) wordt geladen…");
   } else {
     const over = schaal > 1.05 ? ` Hoogte ${nl(schaal, 0)}× overdreven.` : "";
-    $("balk-info").textContent = `${maat}${over} Snijd een stuk uit van maximaal ${ECHT_MAX_M} m voor het echte 3D-beeld. Voorbeelddata.`;
+    $("balk-info").textContent = `${maat}${over} Snijd een stuk uit van maximaal ${ECHT_MAX_M} m voor gebouwen en kabels.`;
   }
   blokTraceToevoegen();
+}
+
+function legendaRegel(kleur, tekst) {
+  const regel = document.createElement("li");
+  const vak = document.createElement("span");
+  vak.className = "legenda-kleur";
+  vak.style.background = kleur;
+  regel.append(vak, tekst);
+  return regel;
+}
+
+/* Legenda met alleen wat in beeld is: grondsoorten op de wanden en de soorten netten. */
+function toonBlokLegenda(ondergrond, netten) {
+  const legenda = $("blok-legenda");
+  legenda.replaceChildren();
+  if (ondergrond) {
+    const codes = new Set(Object.values(ondergrond.zijden).flatMap((z) => z.kolommen.flatMap((k) => k.lithok)));
+    const lijst = document.createElement("ul");
+    for (const k of ondergrond.klassen) if (codes.has(k.code)) lijst.append(legendaRegel(k.kleur, k.naam));
+    legenda.append(Object.assign(document.createElement("h3"), { textContent: "Grond (GeoTOP)" }), lijst);
+  }
+  if (netten) {
+    const aanwezig = new Set(netten.lagen.filter((l) => l.lijnen.length).map((l) => l.soort));
+    const lijst = document.createElement("ul");
+    for (const s of netten.soorten) {
+      if (aanwezig.has(s.id)) lijst.append(legendaRegel(s.kleur, `${s.naam}, ca. ${nl(s.diepte_m, 1)} m diep`));
+    }
+    if (!aanwezig.size) lijst.append(legendaRegel("transparent", "Geen open netdata in dit gebied"));
+    const bronnen = [...new Set(netten.lagen.filter((l) => l.lijnen.length).map((l) => l.beheerder))].join(", ");
+    const bron = Object.assign(document.createElement("p"), { className: "zacht", textContent: `${bronnen ? `Bron: ${bronnen}. ` : ""}${netten.let_op}` });
+    legenda.append(Object.assign(document.createElement("h3"), { textContent: "Kabels en leidingen" }), lijst, bron);
+  }
+  legenda.append(Object.assign(document.createElement("p"), { className: "zacht", textContent: "Lopen: WASD, omhoog/omlaag: E/Q, sneller: Shift." }));
+  legenda.hidden = false;
 }
 
 const LEIDING_DIEPTE_M = 1.2;
@@ -1500,6 +1546,11 @@ async function snijStukUit(bbox) {
 function bindBlok() {
   bindBlokTrace();
   $("tab-blok").addEventListener("click", openBlok);
+  $("blok-onder").addEventListener("click", () => {
+    const aan = $("blok-onder").getAttribute("aria-pressed") !== "true";
+    $("blok-onder").setAttribute("aria-pressed", aan);
+    blokWeergave?.zetOndergronds(aan);
+  });
   $("blok-snijd").addEventListener("click", () => {
     if (blokStaat.kiezen) {
       blokWeergave.annuleerKeuze();
