@@ -95,12 +95,13 @@
           <input id="zoek-invoer" type="search" placeholder="Zoek adres, plaats of postcode" />
           <ul id="zoek-lijst" class="zoek-lijst" hidden></ul>
         </form>
-        <div id="blok" class="blok" aria-label="3D-blok van het gebied" hidden></div>
+        <div id="blok" class="blok" aria-label="3D-wereld van het gebied" hidden></div>
         <aside id="blok-legenda" class="blok-legenda" aria-label="Legenda 3D-blok" hidden></aside>
         <div id="blok-gereedschap" class="blok-gereedschap" hidden>
           <button id="blok-snijd" type="button" aria-pressed="false">Snijd stuk uit</button>
           <button id="blok-heel" type="button" disabled>Heel gebied</button>
-          <button id="blok-onder" type="button" aria-pressed="false" title="Terrein weg: kijk naar grond en kabels">Onder de grond</button>
+          <label for="blok-doorzicht" class="zacht" title="Maak maaiveld en gebouwen doorzichtig om grond en kabels te zien">Doorzicht</label>
+          <input id="blok-doorzicht" type="range" min="0" max="100" step="5" value="0" />
           <button id="blok-teken" type="button" aria-pressed="false" title="Klik punten op het maaiveld, dubbelklik of Enter om af te ronden">Teken tracé</button>
           <label for="blok-wijze" class="verborgen">Aanleg</label>
           <select id="blok-wijze" title="Aanleg">

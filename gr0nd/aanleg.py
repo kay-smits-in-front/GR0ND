@@ -1,24 +1,50 @@
 """Aanleg van een tracé: open ontgraving of gestuurde boring, en kruisingen met bestaande netten.
 
 Alles is indicatief. Coördinaten in RD (meters), diepte positief naar beneden vanaf maaiveld.
-Bronnen: Netbeheer Nederland (0,5 m tussenruimte bij kruisen), boringen Heemstede (intrede 10°).
+Bronnen: Netbeheer Nederland (0,5 m tussenruimte), boring Heemstede (intrede 10°), praktijk.
 """
 
 import math
+from dataclasses import dataclass
 from enum import StrEnum
 
 Punt = tuple[float, float]
 
 MIN_TUSSENRUIMTE_M = 0.5  # verticaal, bij kruisen met een bestaande kabel of leiding
-# shortcut: rechte intrede en uittrede zonder boogstraal; boog toevoegen als het boorplan dat vraagt
-INTREDE_GRADEN = 10.0
-UITTREDE_GRADEN = 10.0
 PROFIEL_STAP_M = 2.0
+SLEUF_EXTRA_M = 0.1  # de sleuf gaat iets dieper dan de kabel (zandbed)
 
 
 class Wijze(StrEnum):
     ONTGRAVEN = "ontgraven"
     BORING = "boring"
+
+
+@dataclass(frozen=True)
+class Aanleg:
+    """Instellingen van de aanleg. Standaardwaarden zijn indicatief; de engineer past ze aan.
+
+    shortcut: een boring gaat recht onder de intrede- en uittredehoek, zonder boogstraal.
+    """
+
+    wijze: Wijze
+    diepte: float = 1.2
+    intrede_graden: float = 10.0
+    uittrede_graden: float = 10.0
+    sleuf_breedte: float = 0.6
+    snelheid_m_per_uur: float = 15.0  # graven ca. 100-150 m per werkdag, boren ca. 150 m
+
+
+def duur_uren(lengte: float, aanleg: Aanleg) -> float:
+    """Werkuren voor het hele tracé bij de ingestelde snelheid."""
+    return lengte / aanleg.snelheid_m_per_uur
+
+
+def grondverzet_m3(lengte: float, aanleg: Aanleg) -> float:
+    """Uitgegraven grond bij ontgraven; een boring verzet (bijna) geen grond aan het maaiveld."""
+    if aanleg.wijze is Wijze.BORING:
+        return 0.0
+    return lengte * aanleg.sleuf_breedte * (aanleg.diepte + SLEUF_EXTRA_M)
 
 
 def afstanden(punten: list[Punt]) -> list[float]:
@@ -29,13 +55,13 @@ def afstanden(punten: list[Punt]) -> list[float]:
     return uit
 
 
-def diepte_op(s: float, lengte: float, wijze: Wijze, diepte: float) -> float:
+def diepte_op(s: float, lengte: float, aanleg: Aanleg) -> float:
     """Diepte van de nieuwe leiding op afstand s. Een boring gaat schuin de grond in en weer uit."""
-    if wijze is Wijze.ONTGRAVEN:
-        return diepte
-    erin = s * math.tan(math.radians(INTREDE_GRADEN))
-    eruit = (lengte - s) * math.tan(math.radians(UITTREDE_GRADEN))
-    return max(0.0, min(diepte, erin, eruit))
+    if aanleg.wijze is Wijze.ONTGRAVEN:
+        return aanleg.diepte
+    erin = s * math.tan(math.radians(aanleg.intrede_graden))
+    eruit = (lengte - s) * math.tan(math.radians(aanleg.uittrede_graden))
+    return max(0.0, min(aanleg.diepte, erin, eruit))
 
 
 def plek_op(punten: list[Punt], langs: list[float], s: float) -> Punt:
@@ -48,17 +74,17 @@ def plek_op(punten: list[Punt], langs: list[float], s: float) -> Punt:
     return punten[0]
 
 
-def profiel(punten: list[Punt], wijze: Wijze, diepte: float) -> list[list[float]]:
+def profiel(punten: list[Punt], aanleg: Aanleg) -> list[list[float]]:
     """Punten [x, y, diepte] van de nieuwe leiding; bij een boring om de PROFIEL_STAP_M."""
     langs = afstanden(punten)
     lengte = langs[-1]
     stappen = {0.0, lengte, *langs}
-    if wijze is Wijze.BORING:
+    if aanleg.wijze is Wijze.BORING:
         stappen |= {i * PROFIEL_STAP_M for i in range(int(lengte / PROFIEL_STAP_M) + 1)}
     uit = []
     for s in sorted(stappen):
         x, y = plek_op(punten, langs, s)
-        uit.append([round(x, 2), round(y, 2), round(diepte_op(s, lengte, wijze, diepte), 2)])
+        uit.append([round(x, 2), round(y, 2), round(diepte_op(s, lengte, aanleg), 2)])
     return uit
 
 
@@ -76,7 +102,7 @@ def snijpunt(a: Punt, b: Punt, c: Punt, d: Punt) -> tuple[float, float] | None:
 
 
 def kruisingen(
-    punten: list[Punt], wijze: Wijze, diepte: float, lagen: list[dict], soorten: dict[str, dict]
+    punten: list[Punt], aanleg: Aanleg, lagen: list[dict], soorten: dict[str, dict]
 ) -> list[dict]:
     """Elke plek waar het tracé een bestaande lijn kruist, met de verticale tussenruimte."""
     langs = afstanden(punten)
@@ -90,7 +116,7 @@ def kruisingen(
                     if raak is None:
                         continue
                     s = langs[i] + raak[0] * (langs[i + 1] - langs[i])
-                    nieuw = diepte_op(s, langs[-1], wijze, diepte)
+                    nieuw = diepte_op(s, langs[-1], aanleg)
                     ruimte = abs(nieuw - kabel_diepte)
                     x, y = plek_op(punten, langs, s)
                     uit.append({

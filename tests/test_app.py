@@ -109,24 +109,13 @@ def test_api_rd_weigert_slechte_punten() -> None:
     assert client.get("/api/rd", params={"punten": "5.3,52.1,7"}).status_code == 400
 
 
-def test_blok_geeft_bodemlagen_en_weigert_een_te_groot_gebied() -> None:
-    client = TestClient(maak_app(DEMO))
-    gebied = {"x0": 120000, "y0": 485000, "x1": 124000, "y1": 489000, "n": 16}
-
-    antwoord = client.get("/api/blok", params=gebied)
-    assert antwoord.status_code == 200
-    assert len(antwoord.json()["onderkant"][0]) == 16 * 16
-
-    assert client.get("/api/blok", params=gebied | {"x1": 200000}).status_code == 400
-
-
-def test_blok_vraagt_inloggen_buiten_demo() -> None:
-    gebied = {"x0": 0, "y0": 0, "x1": 100, "y1": 100}
-
-    assert (
-        TestClient(maak_app(Settings(omgeving="test"))).get("/api/blok", params=gebied).status_code
-        == 401
-    )
+def test_wereld_vraagt_inloggen_en_weigert_te_groot_gebied() -> None:
+    ring = [[0, 0], [5000, 0], [5000, 5000]]
+    productie = TestClient(maak_app(Settings(omgeving="test")))
+    assert productie.post("/api/wereld", json={"ring": ring}).status_code == 401
+    demo = TestClient(maak_app(DEMO))
+    assert demo.post("/api/wereld", json={"ring": ring}).status_code == 400
+    assert demo.post("/api/wereld", json={"ring": ring[:2]}).status_code == 422
 
 
 def test_api_aanleg_geeft_profiel_en_kruisingen(monkeypatch) -> None:
@@ -143,5 +132,14 @@ def test_api_aanleg_geeft_profiel_en_kruisingen(monkeypatch) -> None:
     data = client.get("/api/aanleg", params=vraag).json()
     assert data["lengte"] == 100 and data["profiel"][0][2] == 0
     assert data["kruisingen"][0]["ok"] and data["kruisingen"][0]["s"] == 50
-    assert client.get("/api/aanleg", params=vraag | {"diepte": 99}).status_code == 400
+    assert client.get("/api/aanleg", params=vraag | {"diepte": 99}).status_code == 422
     assert client.get("/api/aanleg", params=vraag | {"wijze": "graven"}).status_code == 422
+
+
+def test_api_aanleg_geeft_duur_en_grondverzet(monkeypatch) -> None:
+    from gr0nd import netten
+
+    monkeypatch.setattr(netten, "haal_netten", lambda gebied: {"soorten": [], "lagen": []})
+    vraag = {"punten": "0,0;150,0", "wijze": "ontgraven", "snelheid_m_per_uur": 30}
+    data = TestClient(maak_app(DEMO)).get("/api/aanleg", params=vraag).json()
+    assert data["duur_uren"] == 5 and data["grondverzet_m3"] == round(150 * 0.6 * 1.3, 1)

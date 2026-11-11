@@ -8,12 +8,13 @@ from pathlib import Path
 from typing import Annotated
 
 import uvicorn
-from fastapi import Depends, FastAPI, Form, HTTPException, Request
+from fastapi import Depends, FastAPI, Form, HTTPException, Query, Request
 from fastapi.responses import FileResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from gr0nd import aanleg, export, geotop, kaart, netten, projectdata
+from gr0nd import aanleg, export, kaart, netten, projectdata, wereld
 from gr0nd.database import Database
 from gr0nd.gebruikers import SESSIE_DUUR, Gebruiker, Gebruikers, Rol, Sessies
 from gr0nd.projecten import Project, Projecten, ProjectIn
@@ -32,6 +33,23 @@ class Settings(BaseSettings):
     omgeving: str = "lokaal"
     database_url: str = ""
     data_map: str = "data"  # hier staan de projecten (voorlopig als bestand)
+
+
+class AanlegIn(BaseModel):
+    """Instellingen van de aanleg, met grenzen die in de praktijk voorkomen."""
+
+    wijze: aanleg.Wijze
+    diepte: float = Field(1.2, ge=0.3, le=40)
+    intrede_graden: float = Field(10.0, ge=3, le=45)
+    uittrede_graden: float = Field(10.0, ge=3, le=45)
+    sleuf_breedte: float = Field(0.6, ge=0.2, le=3)
+    snelheid_m_per_uur: float = Field(15.0, gt=0, le=500)
+
+
+class WereldIn(BaseModel):
+    """Het getekende gebied als ring van RD-punten."""
+
+    ring: list[tuple[float, float]] = Field(min_length=3, max_length=500)
 
 
 def maak_levenscyclus(settings: Settings):
@@ -189,54 +207,49 @@ def maak_app(settings: Settings | None = None) -> FastAPI:
         lon, lat = kaart.rd_naar_wgs84(x, y)
         return {"lon": lon, "lat": lat}
 
-    @app.get("/api/blok")
-    def blok(_: Ingelogd, x0: float, y0: float, x1: float, y1: float, n: int = 48) -> dict:
-        """Bodemlagen van een gebied voor het 3D-blok (voorbeelddata)."""
+    @app.post("/api/wereld")
+    def wereld_van_gebied(_: Ingelogd, invoer: WereldIn) -> dict:
+        """Maaiveld, gebouwen, bomen en grondwanden voor de 3D-wereld van het getekende gebied."""
         try:
-            return kaart.blok(x0, y0, x1, y1, n)
-        except ValueError as fout:
-            raise HTTPException(status_code=400, detail=str(fout)) from fout
-
-    @app.get("/api/ondergrond")
-    def ondergrond(_: Ingelogd, x0: float, y0: float, x1: float, y1: float) -> dict:
-        """Echte grondsoorten (GeoTOP) op de vier wanden van het blok."""
-        try:
-            return geotop.wanden((x0, y0, x1, y1))
+            return wereld.wereld([tuple(p) for p in invoer.ring])
         except ValueError as fout:
             raise HTTPException(status_code=400, detail=str(fout)) from fout
         except OSError as fout:
-            raise HTTPException(status_code=502, detail="GeoTOP is nu niet bereikbaar.") from fout
+            raise HTTPException(
+                status_code=502, detail="Een open-databron is nu niet bereikbaar."
+            ) from fout
 
     @app.get("/api/netten")
     def netten_in_gebied(_: Ingelogd, x0: float, y0: float, x1: float, y1: float) -> dict:
         """Echte kabels en leidingen uit open data van netbeheerders (zonder diepte)."""
-        if max(x1 - x0, y1 - y0) > kaart.BLOK_MAX_M:
+        if max(x1 - x0, y1 - y0) > wereld.MAX_ZIJDE_M:
             raise HTTPException(status_code=400, detail="Het gebied is te groot voor de netten.")
         return netten.haal_netten((x0, y0, x1, y1))
 
     @app.get("/api/aanleg")
     def aanleg_van_trace(
-        _: Ingelogd, punten: str, wijze: aanleg.Wijze, diepte: float = 1.2
+        _: Ingelogd, punten: str, instellingen: Annotated[AanlegIn, Query()]
     ) -> dict:
-        """Profiel van de nieuwe leiding en de kruisingen met open netdata."""
+        """Profiel, duur, grondverzet en kruisingen met open netdata van het nieuwe tracé."""
         paren = lees_punten(punten)
-        if len(paren) < 2 or not 0.3 <= diepte <= 40:
-            raise HTTPException(
-                status_code=400, detail="Geef minstens 2 punten en 0,3 tot 40 m diepte."
-            )
+        if len(paren) < 2:
+            raise HTTPException(status_code=400, detail="Geef minstens 2 punten.")
         xs, ys = [x for x, _ in paren], [y for _, y in paren]
         gebied = (min(xs) - 5, min(ys) - 5, max(xs) + 5, max(ys) + 5)
-        if max(gebied[2] - gebied[0], gebied[3] - gebied[1]) > kaart.BLOK_MAX_M:
+        if max(gebied[2] - gebied[0], gebied[3] - gebied[1]) > wereld.MAX_ZIJDE_M:
             raise HTTPException(status_code=400, detail="Het tracé is te lang voor de netcontrole.")
+        instelling = aanleg.Aanleg(**instellingen.model_dump())
         # shortcut: haalt de netten opnieuw op; cachen als dit te traag wordt
         net = netten.haal_netten(gebied)
         soorten = {s["id"]: s for s in net["soorten"]}
+        lengte = aanleg.afstanden(paren)[-1]
         return {
-            "wijze": wijze,
-            "diepte": diepte,
-            "lengte": round(aanleg.afstanden(paren)[-1], 1),
-            "profiel": aanleg.profiel(paren, wijze, diepte),
-            "kruisingen": aanleg.kruisingen(paren, wijze, diepte, net["lagen"], soorten),
+            **instellingen.model_dump(),
+            "lengte": round(lengte, 1),
+            "duur_uren": round(aanleg.duur_uren(lengte, instelling), 1),
+            "grondverzet_m3": round(aanleg.grondverzet_m3(lengte, instelling), 1),
+            "profiel": aanleg.profiel(paren, instelling),
+            "kruisingen": aanleg.kruisingen(paren, instelling, net["lagen"], soorten),
             "min_tussenruimte": aanleg.MIN_TUSSENRUIMTE_M,
         }
 

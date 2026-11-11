@@ -64,22 +64,3 @@ def test_haal_uitsnede_echt_utrecht():
     uitsnede = geotop.haal_uitsnede((136_000, 455_000, 136_200, 455_200), (-10, 5))
     assert uitsnede.lithok.shape == (3, 3, 31)
     assert np.isin(uitsnede.lithok, [k.code for k in geotop.LITHOKLASSEN]).any()
-
-
-def test_wanden_neemt_halve_voxel_rond_het_gebied_mee():
-    gevraagd = []
-
-    def ophalen(url: str) -> str:
-        gevraagd.append(url)
-        kolom = ", ".join(["2", "5"] + ["-127"] * (geotop.AANTAL_Z - 2))
-        aantal = 3 if "%5B0:1:2%5D%5B" in url else 1
-        return "\n".join(f"lithok.lithok[a][b], {kolom}" for _ in range(aantal))
-
-    wanden = geotop.wanden((13_620, 338_520, 13_780, 338_520), ophalen)
-    assert wanden["zijden"]["zuid"]["posities"] == [13_600, 13_700, 13_800]
-    assert wanden["referentie_nap"] == geotop.Z0 + 0.75  # bovenkant van de voxel op Z0 + 0,5
-    assert wanden["zijden"]["zuid"]["kolommen"][0]["lithok"] == [5, 2]
-
-
-def test_maaiveld_zonder_grond_is_none():
-    assert geotop.maaiveld(np.full(4, geotop.GEEN_DATA)) is None

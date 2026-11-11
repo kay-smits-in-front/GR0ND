@@ -478,47 +478,34 @@ function wachtOpBlokModule() {
   return new Promise((klaar) => window.addEventListener("blok-gereed", klaar, { once: true }));
 }
 
+/* Het getekende gebied als ring van RD-punten. */
 async function gebiedInRd() {
   const paren = gebied.punten.map(([lon, lat]) => `${lon},${lat}`).join(";");
-  const { punten } = await api(`/api/rd?punten=${encodeURIComponent(paren)}`);
-  const xs = punten.map((p) => p[0]);
-  const ys = punten.map((p) => p[1]);
-  return [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
+  return (await api(`/api/rd?punten=${encodeURIComponent(paren)}`)).punten;
 }
 
 const blokStaat = { heel: null, kiezen: false };
 const MIN_STUK_M = 20;
 
-const ECHT_MAX_M = 600; // groter dan dit laden we de PDOK 3D-tiles niet: eerst een stuk uitsnijden
-
-async function haalBlok(bbox) {
-  const [x0, y0, x1, y1] = bbox;
-  const vraag = `x0=${x0}&y0=${y0}&x1=${x1}&y1=${y1}`;
-  const breedte = Math.round(x1 - x0);
-  const diepte = Math.round(y1 - y0);
-  const echt = Math.max(breedte, diepte) <= ECHT_MAX_M;
-  $("balk-info").textContent = "Echte grond (GeoTOP) en netten worden opgehaald…";
-  const [data, ondergrond, netten] = await Promise.all([
-    api(`/api/blok?${vraag}&n=64`),
-    api(`/api/ondergrond?${vraag}`).catch((fout) => (toon(`${fout.message} Wanden: voorbeelddata.`), null)),
-    // shortcut: netten alleen in een echt blok (≤ ECHT_MAX_M); groter wordt te zwaar als buizen
-    echt ? api(`/api/netten?${vraag}`).catch((fout) => (toon(fout.message), null)) : null,
+/* Wereld van het gebied (ring in RD): data van de server, luchtfoto van PDOK en de open netdata, tegelijk. */
+async function haalWereld(ring) {
+  const xs = ring.map((p) => p[0]);
+  const ys = ring.map((p) => p[1]);
+  const bbox = [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
+  const vraag = `x0=${bbox[0]}&y0=${bbox[1]}&x1=${bbox[2]}&y1=${bbox[3]}`;
+  $("balk-info").textContent = "Wereld wordt opgebouwd: hoogte, luchtfoto, gebouwen, bomen, grond en kabels…";
+  const [w, luchtfoto, netten] = await Promise.all([
+    api("/api/wereld", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ring }) }),
+    window.laadLuchtfoto(bbox).catch((fout) => (toon(`${fout.message} Het maaiveld wordt groen.`), null)),
+    api(`/api/netten?${vraag}`).catch((fout) => (toon(fout.message), null)),
   ]);
-  const schaal = blokWeergave.toon(data, echt, ondergrond);
+  const breedte = blokWeergave.toon(w, luchtfoto);
   if (netten) blokWeergave.zetNetten(netten);
-  blokWeergave.zetOndergronds($("blok-onder").getAttribute("aria-pressed") === "true");
-  toonBlokLegenda(ondergrond, netten);
-  const grond = ondergrond ? "Grond: GeoTOP (TNO)." : "Grond: voorbeelddata.";
-  const maat = `3D-blok ${nl(breedte, 0)} × ${nl(diepte, 0)} m. ${grond}`;
-  if (echt) {
-    const toonInfo = (tekst) => ($("balk-info").textContent = `${maat} ${tekst}`);
-    blokWeergave.laadOmgeving(undefined, toonInfo);
-    toonInfo("PDOK 3D (gebouwen, terrein) wordt geladen…");
-  } else {
-    const over = schaal > 1.05 ? ` Hoogte ${nl(schaal, 0)}× overdreven.` : "";
-    $("balk-info").textContent = `${maat}${over} Snijd een stuk uit van maximaal ${ECHT_MAX_M} m voor gebouwen en kabels.`;
-  }
+  toonBlokLegenda(w, netten);
+  const km = (m) => (m >= 1000 ? `${nl(m / 1000, 1)} km` : `${nl(m, 0)} m`);
+  $("balk-info").textContent = `${km(bbox[2] - bbox[0])} × ${km(bbox[3] - bbox[1])} · ${w.gebouwen.length} gebouwen · ${w.bomen.length} bomen · ${w.bronnen}`;
   blokTraceToevoegen();
+  return breedte;
 }
 
 function legendaRegel(kleur, tekst) {
@@ -531,13 +518,13 @@ function legendaRegel(kleur, tekst) {
 }
 
 /* Legenda met alleen wat in beeld is: grondsoorten op de wanden en de soorten netten. */
-function toonBlokLegenda(ondergrond, netten) {
+function toonBlokLegenda(w, netten) {
   const legenda = $("blok-legenda");
   legenda.replaceChildren();
-  if (ondergrond) {
-    const codes = new Set(Object.values(ondergrond.zijden).flatMap((z) => z.kolommen.flatMap((k) => k.lithok)));
+  if (w) {
+    const codes = new Set(w.rand.flatMap((p) => p.lithok));
     const lijst = document.createElement("ul");
-    for (const k of ondergrond.klassen) if (codes.has(k.code)) lijst.append(legendaRegel(k.kleur, k.naam));
+    for (const k of w.klassen) if (codes.has(k.code)) lijst.append(legendaRegel(k.kleur, k.naam));
     legenda.append(Object.assign(document.createElement("h3"), { textContent: "Grond (GeoTOP)" }), lijst);
   }
   if (netten) {
@@ -651,15 +638,16 @@ function bindBlokTrace() {
 function blokKiezenZetten(aan) {
   blokStaat.kiezen = aan;
   $("blok-snijd").setAttribute("aria-pressed", aan);
-  $("blok-info").textContent = aan ? "Sleep een rechthoek op het gras." : "Draaien: slepen. Zoomen: scrollen.";
+  $("blok-info").textContent = aan ? "Sleep een rechthoek op het maaiveld." : "Draaien: slepen. Zoomen: scrollen.";
 }
 
 async function snijStukUit(bbox) {
   blokKiezenZetten(false);
   const [x0, y0, x1, y1] = bbox;
   if (x1 - x0 < MIN_STUK_M || y1 - y0 < MIN_STUK_M) return toon(`Kies een stuk van minstens ${MIN_STUK_M} m.`);
+  const ring = [[x0, y0], [x1, y0], [x1, y1], [x0, y1]];
   try {
-    await haalBlok(bbox);
+    await haalWereld(ring);
     $("blok-heel").disabled = false;
   } catch (fout) {
     toon(fout.message);
@@ -669,11 +657,7 @@ async function snijStukUit(bbox) {
 function bindBlok() {
   bindBlokTrace();
   $("tab-blok").addEventListener("click", openBlok);
-  $("blok-onder").addEventListener("click", () => {
-    const aan = $("blok-onder").getAttribute("aria-pressed") !== "true";
-    $("blok-onder").setAttribute("aria-pressed", aan);
-    blokWeergave?.zetOndergronds(aan);
-  });
+  $("blok-doorzicht").addEventListener("input", () => blokWeergave?.zetDoorzicht(Number($("blok-doorzicht").value) / 100));
   $("blok-snijd").addEventListener("click", () => {
     if (blokStaat.kiezen) {
       blokWeergave.annuleerKeuze();
@@ -684,7 +668,7 @@ function bindBlok() {
   });
   $("blok-heel").addEventListener("click", async () => {
     $("blok-heel").disabled = true;
-    await haalBlok(blokStaat.heel);
+    await haalWereld(blokStaat.heel);
   });
 }
 
@@ -697,7 +681,7 @@ async function openBlok() {
     blokWeergave ??= new window.BlokWeergave($("blok"));
     blokKiezenZetten(false);
     $("blok-heel").disabled = true;
-    await haalBlok(blokStaat.heel);
+    await haalWereld(blokStaat.heel);
   } catch (fout) {
     toon(fout.message);
   }
