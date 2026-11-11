@@ -35,9 +35,6 @@ def test_login_toont_formulier() -> None:
 
 DEMO = Settings(omgeving="lokaal", database_url="")
 PRODUCTIE = Settings(omgeving="productie", database_url="")
-TRACE_PUNTEN = "121000,487000;121000,487500"
-TRACE = {"punten": [[121000, 487000], [121000, 487500]]}
-VRAAG = {"punten": TRACE_PUNTEN}
 
 
 def test_demo_login_gaat_naar_de_kaart() -> None:
@@ -60,7 +57,7 @@ def test_zonder_database_in_productie_stuurt_kaart_naar_login() -> None:
 
     assert antwoord.status_code == 303
     assert antwoord.headers["location"] == "/login"
-    assert client.get("/api/profiel", params=VRAAG).status_code == 401
+    assert client.get("/api/netten", params={"x0": 0, "y0": 0, "x1": 1, "y1": 1}).status_code == 401
 
 
 def test_api_nederland_geeft_omtrek_en_zonekaart() -> None:
@@ -68,50 +65,6 @@ def test_api_nederland_geeft_omtrek_en_zonekaart() -> None:
 
     assert antwoord.status_code == 200
     assert antwoord.json()["crs"] == "EPSG:28992"
-
-
-def test_api_profiel_geeft_lagen_bibliotheek_en_checklist() -> None:
-    antwoord = TestClient(maak_app(DEMO)).get("/api/profiel", params=VRAAG | {"s": 100})
-    inhoud = antwoord.json()
-
-    assert antwoord.status_code == 200
-    assert len(inhoud["lagen"]) == 8
-    assert inhoud["bibliotheek"]
-    assert inhoud["posities"]
-    assert len(inhoud["checklist"]) == 14
-
-
-def test_api_profiel_weigert_te_kort_trace_en_positie_buiten_trace() -> None:
-    client = TestClient(maak_app(DEMO))
-
-    assert (
-        client.get("/api/profiel", params={"punten": "121000,487000;121000,487005"}).status_code
-        == 400
-    )
-    assert client.get("/api/profiel", params=VRAAG | {"s": 9999}).status_code == 400
-
-
-def test_api_controle_meldt_te_weinig_dekking() -> None:
-    leiding = {"id": "n", "type_id": "ms240", "u": -8, "diepte": 0.5, "nieuw": True}
-
-    antwoord = TestClient(maak_app(DEMO)).post(
-        "/api/controle", json=TRACE | {"s": 100, "leidingen": [leiding]}
-    )
-    inhoud = antwoord.json()
-
-    assert antwoord.status_code == 200
-    assert any(m["code"] == "dekking" for m in inhoud["meldingen"])
-    assert inhoud["checklist"]["dekking"] == "fout"
-
-
-def test_api_controle_geeft_422_bij_ontbrekende_buis() -> None:
-    leiding = {"id": "k", "type_id": "ms150", "u": 0, "diepte": 1, "buis_id": "weg"}
-
-    antwoord = TestClient(maak_app(DEMO)).post(
-        "/api/controle", json=TRACE | {"s": 100, "leidingen": [leiding]}
-    )
-
-    assert antwoord.status_code == 422
 
 
 def test_api_lagen_geeft_lagen_en_wat_nog_volgt() -> None:
@@ -154,25 +107,6 @@ def test_api_rd_weigert_slechte_punten() -> None:
 
     assert client.get("/api/rd", params={"punten": "abc"}).status_code == 400
     assert client.get("/api/rd", params={"punten": "5.3,52.1,7"}).status_code == 400
-
-
-def test_api_profiel_en_controle_werken_met_een_bocht() -> None:
-    client = TestClient(maak_app(DEMO))
-    punten = "121000,487000;121000,487300;121400,487300"
-
-    profiel = client.get("/api/profiel", params={"punten": punten, "s": 500}).json()
-    antwoord = client.post(
-        "/api/controle",
-        json={
-            "punten": [[121000, 487000], [121000, 487300], [121400, 487300]],
-            "s": 500,
-            "leidingen": [],
-        },
-    )
-
-    assert profiel["trace"]["azimut"] == 90
-    assert profiel["trace"]["knikken"] == [300.0]
-    assert antwoord.status_code == 200
 
 
 def test_blok_geeft_bodemlagen_en_weigert_een_te_groot_gebied() -> None:

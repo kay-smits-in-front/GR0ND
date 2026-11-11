@@ -11,7 +11,6 @@
     <script type="importmap">
       { "imports": { "three": "/static/vendor/three.module.min.js", "three/addons/": "/static/vendor/" } }
     </script>
-    <script src="/static/penseel.js" defer></script>
     <script src="/static/kaart.js" defer></script>
     <script type="module" src="/static/blok.js"></script>
   </head>
@@ -20,7 +19,6 @@
       <span class="merk-klein">GR0ND</span>
       <nav class="tabs" aria-label="Weergave">
         <button id="tab-overzicht" type="button" aria-pressed="true">Overzicht</button>
-        <button id="tab-zicht" type="button" aria-pressed="false" disabled>0-zicht</button>
         <button id="tab-blok" type="button" aria-pressed="false" disabled title="Teken eerst een gebied">3D-blok</button>
       </nav>
 
@@ -68,7 +66,6 @@
               <button id="wis-trace" type="button" disabled>Wis tracé</button>
             </div>
             <p id="trace-info" class="zacht">Kies Teken tracé en klik de route op de kaart, ook met bochten.</p>
-            <button id="open-zicht" type="button" class="hoofd" disabled>Open 0-zicht</button>
           </section>
         </div>
         <div class="menu">
@@ -87,25 +84,7 @@
         </div>
       </nav>
 
-      <nav id="paneel-zicht" class="menus" aria-label="Menu 0-zicht" hidden>
-        <div class="menu">
-          <button type="button" aria-expanded="false" aria-haspopup="true">Tools</button>
-          <section class="uitklap" hidden>
-            <div id="tools" class="tools-lijst"></div>
-            <button id="herstel" type="button">Herstel zicht</button>
-          </section>
-        </div>
-        <div class="menu">
-          <button type="button" aria-expanded="false" aria-haspopup="true">
-            Checklist <span id="checklist-teller" class="zacht"></span>
-          </button>
-          <section class="uitklap breed" hidden>
-            <ul id="checklist"></ul>
-          </section>
-        </div>
-      </nav>
-
-      <p id="balk-info" class="balk-info">Voorbeelddata: grond, bovengrond en leidingen zijn nog niet echt.</p>
+      <p id="balk-info" class="balk-info"></p>
     </header>
 
     <main class="werk">
@@ -129,24 +108,8 @@
           <output id="blok-meter" hidden></output>
           <span id="blok-info" class="zacht"></span>
         </div>
-        <canvas id="zicht" aria-label="0-zicht: doorsnede loodrecht op het tracé" hidden></canvas>
-        <div id="meldingen" class="meldingen" aria-live="polite"></div>
         <div id="toasts" class="toasts" aria-live="assertive"></div>
         <p id="status" class="status"></p>
-        <div id="positie" class="positie" hidden>
-          <button id="wandel-terug" type="button" title="Terug lopen (pijl links, ingedrukt houden)">◀</button>
-          <button id="wandel-loop" type="button" title="Automatisch vooruit lopen (spatie)">Loop</button>
-          <button id="wandel-vooruit" type="button" title="Vooruit lopen (pijl rechts, ingedrukt houden)">▶</button>
-          <label for="wandel-snelheid" class="verborgen">Snelheid</label>
-          <select id="wandel-snelheid" title="Loopsnelheid">
-            <option value="2">2 m/s</option>
-            <option value="10">10 m/s</option>
-            <option value="40">40 m/s</option>
-          </select>
-          <input id="positie-schuif" type="range" min="0" max="100" step="1" value="0" list="knikken" aria-label="Positie langs het tracé" />
-          <datalist id="knikken"></datalist>
-          <output id="positie-waarde"></output>
-        </div>
       </section>
     </main>
   </body>

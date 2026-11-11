@@ -1,15 +1,11 @@
-"""Kaartmodel van GR0ND: tracé, grondlagen en het 0-zicht (dwarsprofiel).
+"""Kaartmodel van GR0ND: overzichtskaart, kaartlagen, zoeken en het reserveblok.
 
-LET OP: de grondlagen, zones en bovengrond hieronder zijn VOORBEELDDATA. De zones zijn grove
-rechthoeken in RD-coördinaten en vervangen de BRO/GeoTOP-modellen nog niet. De app laat dat in
-beeld zien. Alle afmetingen zijn in meters. In het 0-zicht is u de afstand haaks op het tracé
-(positief links van de looprichting) en is diepte positief naar beneden vanaf het maaiveld.
+LET OP: de grondlagen en zones hieronder zijn VOORBEELDDATA (grove rechthoeken in RD). Het 3D-blok
+gebruikt ze alleen als GeoTOP niet bereikbaar is; de app zegt dat. Afmetingen in meters.
 """
 
-import hashlib
 import json
 import math
-import random
 import re
 import urllib.request
 from dataclasses import asdict, dataclass
@@ -23,13 +19,8 @@ from pyproj import Transformer
 DATA_MAP = Path(__file__).parent / "data"
 
 DIEPTE_M = 50.0
-MIN_TRACE_M = 20.0
-MAX_TRACE_M = 50_000.0
 RD_BEREIK = (-7000.0, 289000.0, 300000.0, 629000.0)  # x_min, y_min, x_max, y_max (EPSG:28992)
-VENSTER_U_M = 30.0  # het 0-zicht toont u van -30 tot +30 m
-U_STAP_M = 1.0
 ZONEKAART_CEL_M = 2500.0
-SEED_STAP_M = 100.0  # de voorbeeldbovengrond verandert elke 100 m langs het tracé
 
 
 @dataclass(frozen=True)
@@ -68,94 +59,6 @@ ZONES = (
 )
 KUSTKLEI, RIVIEREN, ZAND, DRENTS, LOESS = range(len(ZONES))
 DIKTEN = np.array([zone.dikten_m for zone in ZONES], dtype=float)
-
-
-MAX_KNIKPUNTEN = 200
-MIN_STUK_M = 1.0
-
-
-@dataclass(frozen=True)
-class Trace:
-    """Een tracé van beginpunt tot eindpunt via knikpunten, in RD-meters."""
-
-    knikpunten: tuple[tuple[float, float], ...]
-
-    def __post_init__(self) -> None:
-        object.__setattr__(
-            self, "knikpunten", tuple((float(x), float(y)) for x, y in self.knikpunten)
-        )
-        self.controleer()
-
-    @classmethod
-    def recht(cls, ax: float, ay: float, bx: float, by: float) -> "Trace":
-        return cls(((ax, ay), (bx, by)))
-
-    @property
-    def stukken(self) -> list[tuple[float, float, float, float, float]]:
-        """Per stuk tussen twee knikpunten: x, y van het begin, richting dx, dy en lengte."""
-        stukken = []
-        for (x0, y0), (x1, y1) in zip(self.knikpunten, self.knikpunten[1:], strict=False):
-            lengte = math.hypot(x1 - x0, y1 - y0)
-            stukken.append((x0, y0, (x1 - x0) / lengte, (y1 - y0) / lengte, lengte))
-        return stukken
-
-    @property
-    def lengte(self) -> float:
-        return sum(stuk[4] for stuk in self.stukken)
-
-    def plek(self, s: float) -> tuple[float, float, float, float]:
-        """x, y en richting (dx, dy) op afstand s langs het tracé."""
-        rest = min(max(s, 0.0), self.lengte)
-        stukken = self.stukken
-        for x0, y0, dx, dy, lengte in stukken[:-1]:
-            if rest <= lengte:
-                return x0 + dx * rest, y0 + dy * rest, dx, dy
-            rest -= lengte
-        x0, y0, dx, dy, _ = stukken[-1]
-        return x0 + dx * rest, y0 + dy * rest, dx, dy
-
-    @property
-    def afstanden(self) -> list[float]:
-        """Afstand langs het tracé van elk knikpunt, beginnend bij 0."""
-        totaal = [0.0]
-        for stuk in self.stukken:
-            totaal.append(totaal[-1] + stuk[4])
-        return totaal
-
-    def azimut(self, s: float = 0.0) -> float:
-        """Kompasrichting in graden (0 = noord, 90 = oost) op afstand s."""
-        _, _, dx, dy = self.plek(s)
-        return math.degrees(math.atan2(dx, dy)) % 360
-
-    def controleer(self) -> None:
-        """Gooi een ValueError met een Nederlandse melding als het tracé niet kan."""
-        if len(self.knikpunten) < 2:
-            raise ValueError("Een tracé heeft minstens een begin- en een eindpunt.")
-        if len(self.knikpunten) > MAX_KNIKPUNTEN:
-            raise ValueError(f"Een tracé mag maximaal {MAX_KNIKPUNTEN} punten hebben.")
-        x_min, y_min, x_max, y_max = RD_BEREIK
-        for x, y in self.knikpunten:
-            if not (x_min <= x <= x_max and y_min <= y <= y_max):
-                raise ValueError("Het tracé ligt buiten het RD-bereik van Nederland.")
-        for (x0, y0), (x1, y1) in zip(self.knikpunten, self.knikpunten[1:], strict=False):
-            if math.hypot(x1 - x0, y1 - y0) < MIN_STUK_M:
-                raise ValueError("Twee opeenvolgende punten liggen op dezelfde plek.")
-        if self.lengte < MIN_TRACE_M:
-            raise ValueError(f"Het tracé is te kort (minimaal {MIN_TRACE_M:.0f} m).")
-        if self.lengte > MAX_TRACE_M:
-            raise ValueError(f"Het tracé is te lang (maximaal {MAX_TRACE_M / 1000:.0f} km).")
-
-    def punten(self, s: float, u: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-        """RD-coördinaten van de punten op afstand s langs het tracé en u haaks erop."""
-        x, y, dx, dy = self.plek(s)
-        return x - dy * u, y + dx * u
-
-    def seed(self, s: float) -> int:
-        """Vaste waarde per tracé en stukje van 100 m, zodat dezelfde plek er hetzelfde uitziet."""
-        punten = ";".join(f"{x:.0f},{y:.0f}" for x, y in self.knikpunten)
-        return int(
-            hashlib.sha256(f"{punten},{int(s // SEED_STAP_M)}".encode()).hexdigest()[:12], 16
-        )
 
 
 def zone_index(x: np.ndarray, y: np.ndarray) -> np.ndarray:
@@ -240,87 +143,6 @@ def blok(x0: float, y0: float, x1: float, y1: float, n: int = 48) -> dict:
         "lagen": [{"id": laag.id, "naam": laag.naam, "kleur": laag.kleur} for laag in LAGEN],
         "onderkant": [onder[..., i].round(2).ravel().tolist() for i in range(len(LAGEN))],
     }
-
-
-def voorbeeld_bovengrond(seed: int) -> dict:
-    """Voorbeeld-dwarsprofiel: huis, sloot, weg op een berm en een lantaarnpaal.
-
-    Alle waarden zijn u-posities en afmetingen in meters. Geen echte data.
-    """
-    rng = random.Random(seed)
-    verschuiving = round(rng.uniform(-2.0, 2.0), 1)
-    berm = round(rng.uniform(0.4, 0.8), 2)
-    sloot_diepte = round(rng.uniform(0.9, 1.4), 2)
-    teen_links = round(3.0 + verschuiving, 2)
-    kruin_begin = round(teen_links + berm * 3, 2)
-    kruin_eind = round(kruin_begin + 7.0, 2)
-    huis_begin = round(-22.0 + verschuiving, 2)
-    huis_eind = round(huis_begin + 9.0, 2)
-    sloot_links = round(-3.0 + verschuiving - 2.0, 2)
-    huis = {
-        "u0": huis_begin,
-        "u1": huis_eind,
-        "goot": 5.5,
-        "nok": 9.5,
-        "fundering_diepte": 0.8,
-        "fundering_breedte": 0.5,
-    }
-    sloot = {
-        "u_midden": round(-3.0 + verschuiving, 2),
-        "breedte_boven": 4.0,
-        "breedte_bodem": 1.5,
-        "diepte": sloot_diepte,
-        "waterpeil": 0.4,
-    }
-    weg = {
-        "teen_l": teen_links,
-        "kruin0": kruin_begin,
-        "kruin1": kruin_eind,
-        "teen_r": round(kruin_eind + berm * 3, 2),
-        "hoogte": berm,
-        "asfalt": 0.2,
-    }
-    return {
-        "bron": "voorbeelddata",
-        "huizen": [huis],
-        "sloten": [sloot],
-        "wegen": [weg],
-        "lantaarns": [{"u": round(kruin_eind - 0.8, 2), "hoogte": 5.0}],
-        "terreinen": [],
-        # Perceelgrens: links is privéterrein (kavel van het huis), rechts openbaar.
-        "perceel": {"grens": round((huis_eind + sloot_links) / 2, 2)},
-    }  # fmt: skip
-
-
-def dwarsprofiel(trace: Trace, s: float) -> dict:
-    """Het 0-zicht op afstand s langs het tracé: grondlagen plus voorbeeldbovengrond."""
-    if not 0 <= s <= trace.lengte:
-        raise ValueError("De positie ligt buiten het tracé.")
-    us = np.arange(-VENSTER_U_M, VENSTER_U_M + 1e-9, U_STAP_M)
-    x, y = trace.punten(s, us)
-    onder = np.cumsum(laagdikten(x, y), axis=-1)
-    onder[..., -1] = DIEPTE_M
-    aantal = np.bincount(zone_index(x, y), minlength=len(ZONES))
-    zone = ZONES[int(aantal.argmax())]
-    xm, ym = trace.punten(s, np.array([0.0]))
-    return {
-        "bron": "voorbeelddata",
-        "trace": {
-            "lengte": round(trace.lengte, 1), "s": s, "x": round(float(xm[0]), 1),
-            "y": round(float(ym[0]), 1), "azimut": round(trace.azimut(s), 1),
-            "knikken": [round(afstand, 1) for afstand in trace.afstanden[1:-1]],
-        },
-        "zone": zone.naam,
-        "grondwater": zone.grondwater_m,
-        "venster": {"u_min": -VENSTER_U_M, "u_max": VENSTER_U_M, "stap": U_STAP_M,
-                    "diepte": DIEPTE_M},
-        "lagen": [
-            {"id": laag.id, "naam": laag.naam, "kleur": laag.kleur,
-             "onderkant": onder[:, i].round(2).tolist()}
-            for i, laag in enumerate(LAGEN)
-        ],
-        "bovengrond": voorbeeld_bovengrond(trace.seed(s)),
-    }  # fmt: skip
 
 
 @cache

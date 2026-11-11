@@ -4,7 +4,6 @@ import threading
 import webbrowser
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from dataclasses import asdict
 from pathlib import Path
 from typing import Annotated
 
@@ -12,10 +11,9 @@ import uvicorn
 from fastapi import Depends, FastAPI, Form, HTTPException, Request
 from fastapi.responses import FileResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from gr0nd import export, geotop, kaart, netten, ontwerp, projectdata
+from gr0nd import export, geotop, kaart, netten, projectdata
 from gr0nd.database import Database
 from gr0nd.gebruikers import SESSIE_DUUR, Gebruiker, Gebruikers, Rol, Sessies
 from gr0nd.projecten import Project, Projecten, ProjectIn
@@ -34,14 +32,6 @@ class Settings(BaseSettings):
     omgeving: str = "lokaal"
     database_url: str = ""
     data_map: str = "data"  # hier staan de projecten (voorlopig als bestand)
-
-
-class ControleIn(BaseModel):
-    """Invoer voor de controle: het tracé, de positie langs het tracé en alle leidingen."""
-
-    punten: list[tuple[float, float]]
-    s: float
-    leidingen: list[ontwerp.Leiding]
 
 
 def maak_levenscyclus(settings: Settings):
@@ -102,18 +92,6 @@ def lees_punten(tekst: str) -> list[tuple[float, float]]:
         return [tuple(float(deel) for deel in paar.split(",")) for paar in tekst.split(";")]
     except ValueError as fout:
         raise HTTPException(status_code=400, detail="Punten zijn niet goed opgegeven.") from fout
-
-
-def maak_trace(punten: list[tuple[float, float]]) -> kaart.Trace:
-    """Maak een tracé, of geef 400 met de Nederlandse melding."""
-    try:
-        return kaart.Trace(tuple(punten))
-    except ValueError as fout:
-        raise HTTPException(status_code=400, detail=str(fout)) from fout
-
-
-def posities_json(posities: dict[str, tuple[float, float]]) -> dict[str, dict[str, float]]:
-    return {id_: {"u": round(u, 4), "diepte": round(d, 4)} for id_, (u, d) in posities.items()}
 
 
 def maak_app(settings: Settings | None = None) -> FastAPI:
@@ -235,40 +213,6 @@ def maak_app(settings: Settings | None = None) -> FastAPI:
         if max(x1 - x0, y1 - y0) > kaart.BLOK_MAX_M:
             raise HTTPException(status_code=400, detail="Het gebied is te groot voor de netten.")
         return netten.haal_netten((x0, y0, x1, y1))
-
-    @app.get("/api/profiel")
-    def profiel(_: Ingelogd, punten: str, s: float = 0.0) -> dict:
-        """Het 0-zicht met de bibliotheek, bestaande leidingen en de checklist."""
-        trace = maak_trace(lees_punten(punten))
-        try:
-            antwoord = kaart.dwarsprofiel(trace, s)
-        except ValueError as fout:
-            raise HTTPException(status_code=400, detail=str(fout)) from fout
-        bestaand = ontwerp.bestaande_leidingen(antwoord["bovengrond"])
-        _, posities = ontwerp.controleer(antwoord["bovengrond"], bestaand)
-        return antwoord | {
-            "bibliotheek": [asdict(leidingtype) for leidingtype in ontwerp.BIBLIOTHEEK],
-            "leidingen": [leiding.model_dump() for leiding in bestaand],
-            "posities": posities_json(posities),
-            "checklist": [asdict(punt) for punt in ontwerp.CHECKLIST],
-        }
-
-    @app.post("/api/controle")
-    def controle(_: Ingelogd, invoer: ControleIn) -> dict:
-        """Controleer alle leidingen en geef meldingen, posities en de checklist-status."""
-        trace = maak_trace(invoer.punten)
-        bovengrond = kaart.voorbeeld_bovengrond(trace.seed(invoer.s))
-        try:
-            meldingen, posities = ontwerp.controleer(bovengrond, invoer.leidingen)
-        except ValueError as fout:
-            raise HTTPException(status_code=422, detail=str(fout)) from fout
-        heeft_nieuwe = any(leiding.nieuw for leiding in invoer.leidingen)
-        return {
-            "meldingen": [melding.model_dump() for melding in meldingen],
-            "posities": posities_json(posities),
-            "checklist": ontwerp.checklist_status(meldingen, heeft_nieuwe),
-            "afstanden": ontwerp.meetlijnen(bovengrond, invoer.leidingen, posities),
-        }
 
     @app.get("/api/projecten")
     def projecten_lijst(gebruiker: Ingelogd) -> list[Project]:

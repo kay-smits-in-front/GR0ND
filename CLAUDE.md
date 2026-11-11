@@ -8,13 +8,15 @@ Open-source Python-platform om kabels en leidingen in de Nederlandse bodem te to
 - DB-tests draaien alleen met `GR0ND_TEST_DATABASE_URL` (PostgreSQL met PostGIS).
 
 ## Structuur (bewust weinig bestanden)
-- `gr0nd/app.py` instellingen, routes, lokale start. `gr0nd/kaart.py` tracé, grondlagen, 0-zicht.
-- `gr0nd/ontwerp.py` leidingtypen, controles, checklist. `gr0nd/database.py`, `gebruikers.py`, `beheer.py`.
-- `gr0nd/static/` intro, login, kaart (HTML/CSS/JS, canvas 2D zonder library).
+- `gr0nd/app.py` instellingen, routes, lokale start. `gr0nd/kaart.py` overzichtskaart, lagen, zoeken.
+- `gr0nd/geotop.py` echte grond (TNO GeoTOP). `gr0nd/netten.py` echte kabels (open data netbeheerders).
+- `gr0nd/database.py`, `gebruikers.py`, `beheer.py`, `projecten.py`, `projectdata.py`, `export.py`.
+- `gr0nd/static/` intro, login, kaart (MapLibre) en `blok.js` (3D-blok, three.js).
 - `docs/` onderzoek (doel en workflow, bronnen, 3D, export, stations en kabels, layout).
 
 ## Regels
 - Modern Python, één functie doet één ding, classes waar het past, Nederlandse namen en meldingen.
-- Coördinaten: RD + NAP (EPSG:7415) in meters. In het 0-zicht: u haaks op tracé, diepte positief naar beneden.
-- Grond, bovengrond en bestaande leidingen zijn VOORBEELDDATA; de UI zegt dat.
+- Coördinaten: RD + NAP (EPSG:7415) in meters. In het blok: x = RD-oost, y = omhoog, z = -RD-noord.
+- Toon altijd de bron. Open netdata heeft geen diepte: de diepte is indicatief en de UI zegt dat.
+- Het 0-zicht is verwijderd; alles gebeurt in het 3D-blok.
 - Niet doen: eigen 3D-formaat (zie docs/export-onderzoek.md), betaalde diensten aanmaken zonder akkoord.
