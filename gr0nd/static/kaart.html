@@ -102,25 +102,42 @@
           <div class="velden">
             <label for="aanleg-wijze">Wijze</label>
             <select id="aanleg-wijze">
-              <option value="ontgraven">Ontgraven (sleuf)</option>
-              <option value="boring">Gestuurde boring</option>
+              <option value="ontgraven">Graven, boren waar gekozen</option>
+              <option value="boring">Hele tracé boren</option>
             </select>
             <label for="aanleg-diepte">Diepte (m)</label>
             <input id="aanleg-diepte" type="number" min="0.3" max="40" step="0.1" value="1.2" />
-            <label for="aanleg-intrede" data-voor="boring">Intredehoek (°)</label>
-            <input id="aanleg-intrede" data-voor="boring" type="number" min="3" max="45" step="1" value="10" />
-            <label for="aanleg-uittrede" data-voor="boring">Uittredehoek (°)</label>
-            <input id="aanleg-uittrede" data-voor="boring" type="number" min="3" max="45" step="1" value="10" />
             <label for="aanleg-breedte" data-voor="ontgraven">Sleufbreedte (m)</label>
             <input id="aanleg-breedte" data-voor="ontgraven" type="number" min="0.2" max="3" step="0.1" value="0.6" />
-            <label for="aanleg-snelheid">Snelheid (m/uur)</label>
+            <label for="aanleg-snelheid">Graaf-/boorsnelheid (m/uur)</label>
             <input id="aanleg-snelheid" type="number" min="1" max="500" step="1" value="15" />
+            <label for="aanleg-boordiepte" data-voor="ontgraven">Boordiepte (m)</label>
+            <input id="aanleg-boordiepte" data-voor="ontgraven" type="number" min="0.5" max="40" step="0.5" value="4" />
+            <label for="aanleg-boorsnelheid" data-voor="ontgraven">Boorsnelheid (m/uur)</label>
+            <input id="aanleg-boorsnelheid" data-voor="ontgraven" type="number" min="1" max="500" step="1" value="20" />
+            <label for="aanleg-intrede">Intredehoek (°)</label>
+            <input id="aanleg-intrede" type="number" min="3" max="45" step="1" value="10" />
+            <label for="aanleg-uittrede">Uittredehoek (°)</label>
+            <input id="aanleg-uittrede" type="number" min="3" max="45" step="1" value="10" />
+          </div>
+          <div data-voor="ontgraven">
+            <h4>Boringen</h4>
+            <ul id="aanleg-boringen" class="boringen"></ul>
+            <h4 id="aanleg-voorstellen-kop" hidden>Voorgesteld (water, rijbaan)</h4>
+            <ul id="aanleg-voorstellen" class="boringen"></ul>
+            <button id="aanleg-plaats-boring" type="button" disabled>Plaats boring</button>
           </div>
           <dl id="aanleg-uitkomst" class="uitkomst"><dt>Tracé</dt><dd>Teken een tracé in de wereld.</dd></dl>
           <div class="knoppen">
             <button id="aanleg-start" type="button" class="hoofd" disabled>Start aanleg</button>
-            <a id="aanleg-export" class="knop" href="#" download hidden>Exporteer GeoJSON</a>
+            <button id="aanleg-export" type="button" disabled>Exporteer GeoJSON</button>
           </div>
+        </aside>
+        <aside id="aandacht-paneel" class="aandacht-paneel" aria-label="Aandachtspunten langs het tracé" hidden>
+          <h3>Aandachtspunten</h3>
+          <div id="aandacht-filters" class="aandacht-filters"></div>
+          <ul id="aandacht-lijst" class="aandacht-lijst"></ul>
+          <p class="zacht">Indicatief, uit open data. Geen vervanging van KLIC, vergunning of veldonderzoek.</p>
         </aside>
         <div id="blok-gereedschap" class="blok-gereedschap" hidden>
           <button id="blok-snijd" type="button" aria-pressed="false">Snijd stuk uit</button>

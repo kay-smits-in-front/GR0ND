@@ -462,6 +462,7 @@ function zetWeergave(naam) {
   $("blok-gereedschap").hidden = !blokActief;
   if (!blokActief) $("blok-legenda").hidden = true;
   $("aanleg-paneel").hidden = !blokActief;
+  if (!blokActief) $("aandacht-paneel").hidden = true;
   $("paneel-overzicht").hidden = !overzichtActief;
   $("tab-overzicht").setAttribute("aria-pressed", overzichtActief);
   $("tab-blok").setAttribute("aria-pressed", blokActief);
@@ -506,6 +507,7 @@ async function haalWereld(ring) {
   const km = (m) => (m >= 1000 ? `${nl(m / 1000, 1)} km` : `${nl(m, 0)} m`);
   $("balk-info").textContent = `${km(bbox[2] - bbox[0])} × ${km(bbox[3] - bbox[1])} · ${w.gebouwen.length} gebouwen · ${w.bomen.length} bomen · ${w.bronnen}`;
   blokTraceToevoegen();
+  haalAandacht();
   return breedte;
 }
 
@@ -520,8 +522,11 @@ function legendaRegel(kleur, tekst) {
 
 /* Legenda met alleen wat in beeld is: grondsoorten op de wanden en de soorten netten. */
 function toonBlokLegenda(w, netten) {
-  const legenda = $("blok-legenda");
-  legenda.replaceChildren();
+  $("blok-legenda").replaceChildren();
+  const uitklap = document.createElement("details");
+  uitklap.append(Object.assign(document.createElement("summary"), { textContent: "Legenda en besturing" }));
+  $("blok-legenda").append(uitklap);
+  const legenda = uitklap;
   if (w) {
     const codes = new Set(w.rand.flatMap((p) => p.lithok));
     const lijst = document.createElement("ul");
@@ -541,22 +546,25 @@ function toonBlokLegenda(w, netten) {
     legenda.append(Object.assign(document.createElement("h3"), { textContent: "Kabels en leidingen" }), lijst, bron);
   }
   legenda.append(Object.assign(document.createElement("p"), { className: "zacht", textContent: "Links slepen: schuiven. Rechts slepen: draaien. Scrollen: zoomen naar de muis. Dubbelklik: erheen vliegen. WASD/E/Q: bewegen, Shift: sneller." }));
-  legenda.hidden = false;
+  $("blok-legenda").hidden = false;
 }
 
-/* ---------- aanleg: instellingen, uitkomst, animatie en export ---------- */
+/* ---------- aanleg: instellingen, boringen, uitkomst, animatie en export ---------- */
 
 const AANLEG_VELDEN = {
   wijze: "aanleg-wijze", diepte: "aanleg-diepte", intrede_graden: "aanleg-intrede",
   uittrede_graden: "aanleg-uittrede", sleuf_breedte: "aanleg-breedte", snelheid_m_per_uur: "aanleg-snelheid",
+  boor_diepte: "aanleg-boordiepte", boor_snelheid_m_per_uur: "aanleg-boorsnelheid",
 };
 
 function leesAanleg() {
-  return Object.fromEntries(Object.entries(AANLEG_VELDEN).map(([sleutel, id]) => [sleutel, $(id).value]));
+  const velden = Object.entries(AANLEG_VELDEN).map(([sleutel, id]) => [sleutel, sleutel === "wijze" ? $(id).value : Number($(id).value)]);
+  return { ...Object.fromEntries(velden), boringen: staat.boringen };
 }
 
 function zetAanlegVelden(aanleg) {
   for (const [sleutel, id] of Object.entries(AANLEG_VELDEN)) if (aanleg?.[sleutel] != null) $(id).value = aanleg[sleutel];
+  staat.boringen = aanleg?.boringen?.map((b) => [...b]) ?? [];
   toonWijzeVelden();
 }
 
@@ -566,9 +574,12 @@ function toonWijzeVelden() {
   for (const veld of document.querySelectorAll("#aanleg-paneel [data-voor]")) veld.hidden = veld.dataset.voor !== wijze;
 }
 
-function aanlegVraag() {
-  const punten = staat.trace.rd.map(([x, y]) => `${x.toFixed(2)},${y.toFixed(2)}`).join(";");
-  return new URLSearchParams({ punten, ...leesAanleg() }).toString();
+function postJson(pad, data) {
+  return api(pad, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) });
+}
+
+function traceVraag() {
+  return { punten: staat.trace.rd, aanleg: leesAanleg(), naam: $("project-naam").value.trim() || "tracé" };
 }
 
 /* Profiel, duur en kruisingen van het tracé ophalen en in de wereld tekenen. */
@@ -578,13 +589,14 @@ async function blokTraceToevoegen() {
   staat.aanleg = null;
   if (staat.trace.rd.length >= 2) {
     try {
-      staat.aanleg = await api(`/api/aanleg?${aanlegVraag()}`);
+      staat.aanleg = await postJson("/api/aanleg", traceVraag());
       lengte = blokWeergave.zetAanleg(staat.aanleg);
     } catch (fout) {
       toon(fout.message);
     }
   }
   toonAanleg(staat.aanleg);
+  toonBoringen();
   const heeft = lengte > 0;
   for (const id of ["blok-volg", "blok-loop", "blok-positie", "blok-meter"]) $(id).hidden = !heeft;
   $("blok-positie").max = Math.floor(lengte);
@@ -599,23 +611,129 @@ function uitkomstRegel(term, waarde) {
 }
 
 function toonAanleg(aanleg) {
-  $("aanleg-start").disabled = !aanleg;
-  $("aanleg-export").hidden = !aanleg;
+  for (const id of ["aanleg-start", "aanleg-export", "aanleg-plaats-boring"]) $(id).disabled = !aanleg;
   if (!aanleg) {
     $("aanleg-uitkomst").replaceChildren(...uitkomstRegel("Tracé", "Teken een tracé in de wereld."));
     return;
   }
-  const naam = $("project-naam").value.trim() || "tracé";
-  $("aanleg-export").href = `/api/aanleg/geojson?${aanlegVraag()}&naam=${encodeURIComponent(naam)}`;
   const te_dicht = aanleg.kruisingen.filter((k) => !k.ok).length;
   const dagen = aanleg.duur_uren / 8;
+  const geboord = aanleg.boorstukken.reduce((som, [a, b]) => som + b - a, 0);
   $("aanleg-uitkomst").replaceChildren(
-    ...uitkomstRegel("Lengte", `${nl(aanleg.lengte, 0)} m`),
-    ...uitkomstRegel("Duur", `${nl(aanleg.duur_uren, 1)} uur (${nl(dagen, 1)} werkdag${dagen === 1 ? "" : "en"} van 8 uur)`),
-    ...(aanleg.wijze === "ontgraven" ? uitkomstRegel("Grondverzet", `${nl(aanleg.grondverzet_m3, 0)} m³`) : []),
+    ...uitkomstRegel("Lengte", `${nl(aanleg.lengte, 0)} m, waarvan ${nl(geboord, 0)} m geboord`),
+    ...uitkomstRegel("Duur", `${nl(aanleg.duur_uren, 1)} uur (${nl(dagen, 1)} werkdagen van 8 uur)`),
+    ...uitkomstRegel("Grondverzet", `${nl(aanleg.grondverzet_m3, 0)} m³`),
     ...uitkomstRegel("Kruisingen", aanleg.kruisingen.length ? `${aanleg.kruisingen.length}, waarvan ${te_dicht} te dicht (< ${nl(aanleg.min_tussenruimte, 1)} m)` : "geen (open netdata)"),
   );
 }
+
+/* ---------- boringen: zelf plaatsen of een voorstel overnemen ---------- */
+
+function knop(tekst, actie, titel = "") {
+  const el = Object.assign(document.createElement("button"), { type: "button", textContent: tekst, title: titel });
+  el.addEventListener("click", actie);
+  return el;
+}
+
+function boringRegel([a, b], acties) {
+  const regel = document.createElement("li");
+  regel.append(`${nl(a, 0)}–${nl(b, 0)} m (${nl(b - a, 0)} m) `, ...acties);
+  return regel;
+}
+
+function toonBoringen() {
+  const gekozen = staat.boringen.map((stuk, i) =>
+    boringRegel(stuk, [knop("✕", () => { staat.boringen.splice(i, 1); blokTraceToevoegen(); }, "Boring weghalen")]),
+  );
+  const leeg = Object.assign(document.createElement("li"), { className: "zacht", textContent: "Nog geen boringen: alles wordt gegraven." });
+  $("aanleg-boringen").replaceChildren(...(gekozen.length ? gekozen : [leeg]));
+  const voorstellen = (staat.aandachtData?.voorstel_boringen ?? []).filter(([a, b]) => !staat.boringen.some(([c, d]) => c <= a && d >= b));
+  $("aanleg-voorstellen").replaceChildren(...voorstellen.map((stuk) => boringRegel(stuk, [knop("Neem over", () => neemBoringOver(stuk))])));
+  $("aanleg-voorstellen-kop").hidden = !voorstellen.length;
+}
+
+function neemBoringOver(stuk) {
+  staat.boringen.push([...stuk]);
+  blokTraceToevoegen();
+}
+
+/* Twee klikken op of bij het tracé: begin en eind van de boring. */
+function plaatsBoring() {
+  if (!staat.aanleg) return;
+  $("blok-info").textContent = "Klik het intredepunt en daarna het uittredepunt van de boring op het tracé. Esc: stoppen.";
+  blokWeergave.tekenTrace(([[x0, y0], [x1, y1]]) => {
+    const profiel = staat.aanleg.profiel;
+    const s = [blokWeergave.afstandLangs(profiel, x0, y0), blokWeergave.afstandLangs(profiel, x1, y1)].sort((a, b) => a - b);
+    if (s[1] - s[0] < 2) return toon("Een boring moet minstens 2 m lang zijn.");
+    neemBoringOver(s.map((v) => Math.round(v * 10) / 10));
+  }, 2);
+}
+
+/* ---------- aandachtspunten: lijst, filters en pop-ups ---------- */
+
+const AANDACHT_SOORTEN = {
+  obstakel: "Obstakels", kabels: "Kabels", grond: "Grond", eigendom: "Privéterrein",
+  perceel: "Percelen", natuur: "Natuur", regels: "Regels",
+};
+const STANDAARD_UIT = new Set(["perceel"]); // veel punten: standaard alleen in de lijst
+
+async function haalAandacht() {
+  staat.aandachtData = null;
+  toonAandacht();
+  if (staat.trace.rd.length < 2) return;
+  try {
+    staat.aandachtData = await postJson("/api/aandacht", traceVraag());
+    if (staat.aandachtData.fouten.length) toon(`Niet alle bronnen antwoordden: ${staat.aandachtData.fouten.join("; ")}`);
+  } catch (fout) {
+    toon(fout.message);
+  }
+  toonAandacht();
+  toonBoringen();
+}
+
+function aandachtSleutel(p) {
+  return `${p.soort}|${p.titel}|${p.s}`;
+}
+
+function aandachtFilter(soort, naam, aantal) {
+  const vak = Object.assign(document.createElement("input"), { type: "checkbox", checked: !staat.aandachtUit.has(soort), id: `aandacht-${soort}` });
+  vak.addEventListener("change", () => {
+    if (vak.checked) staat.aandachtUit.delete(soort);
+    else staat.aandachtUit.add(soort);
+    toonAandacht();
+  });
+  const label = Object.assign(document.createElement("label"), { htmlFor: vak.id, className: `soort-${soort}` });
+  label.append(vak, ` ${naam} (${aantal})`);
+  return label;
+}
+
+function aandachtRegel(p) {
+  const regel = Object.assign(document.createElement("li"), { className: `soort-${p.soort}` });
+  const titel = knop(`${p.algemeen ? "" : `${nl(p.s, 0)} m · `}${p.titel}`, () => !p.algemeen && blokWeergave.vliegNaarRd(p.x, p.y), p.tekst);
+  titel.className = "aandacht-titel";
+  regel.append(titel, Object.assign(document.createElement("p"), { textContent: `${p.tekst} Bron: ${p.bron}.` }));
+  if (staat.weggeklikt.has(aandachtSleutel(p))) regel.classList.add("weggeklikt");
+  return regel;
+}
+
+function toonAandacht() {
+  const data = staat.aandachtData;
+  $("aandacht-paneel").hidden = !data;
+  if (!data) return blokWeergave?.zetAandacht([], () => {});
+  const aantal = (soort) => data.punten.filter((p) => p.soort === soort).length;
+  $("aandacht-filters").replaceChildren(
+    ...Object.entries(AANDACHT_SOORTEN).filter(([soort]) => aantal(soort)).map(([soort, naam]) => aandachtFilter(soort, naam, aantal(soort))),
+  );
+  const zichtbaar = data.punten.filter((p) => !staat.aandachtUit.has(p.soort));
+  $("aandacht-lijst").replaceChildren(...zichtbaar.map(aandachtRegel));
+  const popups = zichtbaar.filter((p) => !p.algemeen && !staat.weggeklikt.has(aandachtSleutel(p)));
+  blokWeergave?.zetAandacht(popups, (p) => {
+    staat.weggeklikt.add(aandachtSleutel(p));
+    toonAandacht();
+  });
+}
+
+/* ---------- animatie en export ---------- */
 
 function startAanleg() {
   if (!staat.aanleg) return;
@@ -626,7 +744,19 @@ function startAanleg() {
   });
 }
 
+async function exporteerTrace() {
+  const antwoord = await fetch("/api/aanleg/geojson", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(traceVraag()) });
+  if (!antwoord.ok) return toon("Exporteren is mislukt. Probeer het opnieuw.");
+  const naam = antwoord.headers.get("content-disposition")?.match(/filename="([^"]+)"/)?.[1] ?? "trace.geojson";
+  const link = Object.assign(document.createElement("a"), { href: URL.createObjectURL(await antwoord.blob()), download: naam });
+  link.click();
+  URL.revokeObjectURL(link.href);
+}
+
 function bindAanleg() {
+  staat.boringen = [];
+  staat.aandachtUit = new Set(STANDAARD_UIT);
+  staat.weggeklikt = new Set();
   $("aanleg-wijze").addEventListener("change", () => {
     const boring = $("aanleg-wijze").value === "boring";
     if (boring && Number($("aanleg-diepte").value) < 3) $("aanleg-diepte").value = 4;
@@ -635,7 +765,10 @@ function bindAanleg() {
     blokTraceToevoegen();
   });
   for (const id of Object.values(AANLEG_VELDEN).slice(1)) $(id).addEventListener("change", blokTraceToevoegen);
+  $("aanleg-diepte").addEventListener("change", haalAandacht); // grondsoort op leidingdiepte
   $("aanleg-start").addEventListener("click", startAanleg);
+  $("aanleg-export").addEventListener("click", exporteerTrace);
+  $("aanleg-plaats-boring").addEventListener("click", plaatsBoring);
   toonWijzeVelden();
 }
 
@@ -645,8 +778,10 @@ async function blokTraceGetekend(rd) {
   try {
     const ll = await Promise.all(rd.map(([x, y]) => api(`/api/wgs84?x=${x}&y=${y}`)));
     staat.trace = { ll: ll.map((p) => [p.lon, p.lat]), rd, tekenen: false };
+    staat.boringen = [];
+    staat.weggeklikt = new Set();
     traceVeranderd();
-    await blokTraceToevoegen();
+    await Promise.all([blokTraceToevoegen(), haalAandacht()]);
   } catch (fout) {
     toon(fout.message);
   }

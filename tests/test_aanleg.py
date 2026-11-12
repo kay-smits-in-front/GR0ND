@@ -75,3 +75,21 @@ def test_geojson_heeft_lijn_met_diepte_en_kruisingen():
 def test_aanleg_weigert_onmogelijke_waarden():
     with pytest.raises(ValueError):
         Aanleg(wijze=Wijze.BORING, intrede_graden=80)
+
+
+def test_boring_alleen_op_het_gekozen_stuk():
+    instelling = Aanleg(wijze=Wijze.ONTGRAVEN, diepte=1.0, boringen=[(40, 60)], boor_diepte=3)
+    diepte = {x: d for x, _, d in aanleg.profiel(RECHT, instelling)}
+    assert diepte[0] == diepte[100] == 1.0  # gegraven
+    assert diepte[40] == 0 and diepte[60] == 0  # in- en uittredepunt aan het maaiveld
+    assert diepte[50] == pytest.approx(10 * math.tan(math.radians(10)), abs=0.01)
+
+
+def test_duur_en_grondverzet_met_een_boring():
+    instelling = Aanleg(
+        wijze=Wijze.ONTGRAVEN, diepte=1.2, sleuf_breedte=0.5, snelheid_m_per_uur=10,
+        boringen=[(20, 60), (50, 200)], boor_snelheid_m_per_uur=40,
+    )  # fmt: skip
+    assert aanleg.boorstukken(100, instelling) == [(20, 100)]  # overlap wordt één boring
+    assert aanleg.duur_uren(100, instelling) == pytest.approx(20 / 10 + 80 / 40)
+    assert aanleg.grondverzet_m3(100, instelling) == pytest.approx(20 * 0.5 * 1.3)

@@ -13,6 +13,8 @@ const DAKEN_SCHUIN = ["#b5533c", "#a2483a", "#5b5f66", "#7a4a35"];
 const DAK_PLAT = "#cfc8bb";
 const KROONKLEUREN = ["#4f8a3c", "#5c9a44", "#3f7a35", "#6aa64f"];
 const LUCHTFOTO = "https://service.pdok.nl/hwh/luchtfotorgb/wms/v1_0";
+const MAX_LABELS = 12;
+const VOORRANG = { obstakel: 0, kabels: 1, natuur: 2, eigendom: 3, grond: 4, perceel: 5 }; // welk label wint bij overlap
 const BLOKJE_M = 0.5; // grondblokjes bij het graven, zoals de voxels van GeoTOP
 const MAX_BLOKJES = 40000;
 const AANLEG_SPEELDUUR_MS = 24000; // de hele aanleg in beeld, de klok toont de echte werkuren
@@ -137,6 +139,16 @@ function bemonster(profiel, stap) {
     s += lengte;
   }
   return uit;
+}
+
+/* Splits punten (met s) in stukken zonder gat groter dan `gat` meter. */
+function aaneengesloten(punten, gat) {
+  const stukken = [];
+  for (const p of punten) {
+    if (!stukken.length || p.s - stukken.at(-1).at(-1).s > gat) stukken.push([]);
+    stukken.at(-1).push(p);
+  }
+  return stukken;
 }
 
 /* Strook langs de punten met de gegeven breedte, net boven het maaiveld; volgorde langs het tracé. */
@@ -560,9 +572,9 @@ export class BlokWeergave {
   }
 
   /* Tracé tekenen: klik punten op het maaiveld, dubbelklik of Enter om af te ronden, Esc om te stoppen. */
-  tekenTrace(klaar) {
+  tekenTrace(klaar, maxPunten = Infinity) {
     this.annuleerKeuze();
-    this.tekenen = { klaar, punten: [], voorbeeld: null };
+    this.tekenen = { klaar, punten: [], voorbeeld: null, maxPunten };
     this.renderer.domElement.style.cursor = "crosshair";
   }
 
@@ -575,6 +587,7 @@ export class BlokWeergave {
   voegTekenpuntToe(punt) {
     const t = this.tekenen;
     t.punten.push(punt);
+    if (t.punten.length >= t.maxPunten) return this.rondTekenenAf();
     if (t.voorbeeld) this.scene.remove(t.voorbeeld);
     if (t.punten.length < 2) return;
     t.voorbeeld = bouwBuis(t.punten.map((p) => p.punt.clone().setY(p.punt.y + 0.4)), 0.4, "#ffb454");
@@ -615,12 +628,35 @@ export class BlokWeergave {
   zetAanleg(aanleg) {
     this.wisTrace();
     if (!this.wereld || aanleg.profiel.length < 2) return 0;
-    const maaiveld = aanleg.profiel.map(([x, y]) => this.naarScene(x, y, this.hoogte(x, y) + 0.2));
+    const geboord = (s) => aanleg.boorstukken.some(([a, b]) => s > a + 0.005 && s < b - 0.005);
     const leiding = aanleg.profiel.map(([x, y, d]) => this.naarScene(x, y, this.hoogte(x, y) - d));
+    const maaiveld = aanleg.profiel.map(([x, y]) => this.naarScene(x, y, this.hoogte(x, y) + 0.2));
     this.trace = new THREE.Group();
-    this.trace.add(bouwBuis(maaiveld, 0.3, "#ffb454"), bouwBuis(leiding, 0.35, "#ff5a3c"));
-    this.trace.add(bouwGordijn(maaiveld, leiding, aanleg.wijze === "ontgraven" ? "#8a5a2b" : "#e8a860"));
-    const bol = new THREE.SphereGeometry(Math.max(1.2, this.breedte * 0.003), 16, 12);
+    this.trace.add(bouwBuis(leiding, 0.25, "#ff5a3c"));
+    // gegraven stukken: symbolisch open sleuf (donker) met een grondwal ernaast
+    const punten = bemonster(aanleg.profiel, 1).filter((p) => !geboord(p.s));
+    const hoogte = (x, y) => this.hoogte(x, y);
+    const scene = (x, y, h) => this.naarScene(x, y, h);
+    for (const stuk of aaneengesloten(punten, 1.5)) {
+      if (stuk.length < 2) continue;
+      this.trace.add(bouwStrook(stuk, aanleg.sleuf_breedte, hoogte, scene, GROND.open));
+      const wal = stuk.map((p) => ({ ...p, x: p.x + p.nx * (aanleg.sleuf_breedte / 2 + 0.6), y: p.y + p.ny * (aanleg.sleuf_breedte / 2 + 0.6) }));
+      this.trace.add(bouwStrook(wal, 0.9, (x, y) => this.hoogte(x, y) + 0.25, scene, GROND.dicht));
+    }
+    // geboorde stukken: vlaggen bij intrede en uittrede, en de boorlijn
+    for (const [a, b] of aanleg.boorstukken) {
+      for (const [s, naam, kleur] of [[a, "Intrede boring", "#ffd23f"], [b, "Uittrede boring", "#3ddc84"]]) {
+        const p = this.plekLangs(aanleg.profiel, s);
+        const voet = this.naarScene(p[0], p[1], this.hoogte(p[0], p[1]));
+        const paal = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 4, 6), new THREE.MeshStandardMaterial({ color: "#eeeeee" }));
+        paal.position.copy(voet).setY(voet.y + 2);
+        const vlag = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.7, 0.05), new THREE.MeshStandardMaterial({ color: kleur, emissive: kleur, emissiveIntensity: 0.4 }));
+        vlag.position.copy(voet).setY(voet.y + 3.6).setX(voet.x + 0.6);
+        this.trace.add(paal, vlag);
+      }
+    }
+    this.trace.add(bouwGordijn(maaiveld, leiding, "#e8a860"));
+    const bol = new THREE.SphereGeometry(Math.max(0.8, this.breedte * 0.002), 16, 12);
     for (const k of aanleg.kruisingen) {
       const teken = new THREE.Mesh(bol, new THREE.MeshBasicMaterial({ color: k.ok ? "#3ddc84" : "#ff3b3b", depthTest: false, transparent: true }));
       teken.position.copy(this.naarScene(k.x, k.y, this.hoogte(k.x, k.y) - k.kabel_diepte));
@@ -629,7 +665,90 @@ export class BlokWeergave {
     }
     this.scene.add(this.trace);
     this.pad = { punten: maaiveld, lengtes: padLengtes(maaiveld) };
+    this.aanleg = aanleg;
     return this.pad.lengtes.at(-1);
+  }
+
+  /* Plek [x, y] op afstand s langs het profiel (RD). */
+  plekLangs(profiel, s) {
+    let rest = s;
+    for (let i = 1; i < profiel.length; i++) {
+      const [[x0, y0], [x1, y1]] = [profiel[i - 1], profiel[i]];
+      const lengte = Math.hypot(x1 - x0, y1 - y0);
+      if (rest <= lengte || i === profiel.length - 1) {
+        const t = lengte ? Math.min(rest / lengte, 1) : 0;
+        return [x0 + t * (x1 - x0), y0 + t * (y1 - y0)];
+      }
+      rest -= lengte;
+    }
+    return profiel[0];
+  }
+
+  /* Afstand langs het tracé van het punt op het tracé dat het dichtst bij (x, y) ligt. */
+  afstandLangs(profiel, x, y) {
+    let [beste, s, uit] = [Infinity, 0, 0];
+    for (let i = 1; i < profiel.length; i++) {
+      const [[x0, y0], [x1, y1]] = [profiel[i - 1], profiel[i]];
+      const [dx, dy] = [x1 - x0, y1 - y0];
+      const lengte = Math.hypot(dx, dy);
+      const t = lengte ? Math.min(Math.max(((x - x0) * dx + (y - y0) * dy) / (lengte * lengte), 0), 1) : 0;
+      const afstand = Math.hypot(x0 + t * dx - x, y0 + t * dy - y);
+      if (afstand < beste) [beste, uit] = [afstand, s + t * lengte];
+      s += lengte;
+    }
+    return uit;
+  }
+
+  /* ---------- aandachtspunten als pop-ups in beeld ---------- */
+
+  /* Pop-ups bij plekken in de wereld. `punten`: [{x, y, titel, tekst, bron, soort}]; `sluit(punt)` bij ✕. */
+  zetAandacht(punten, sluit) {
+    this.labels ??= Object.assign(document.createElement("div"), { className: "labels" });
+    this.houder.append(this.labels);
+    this.labels.replaceChildren();
+    this.aandacht = punten.map((p) => {
+      const el = document.createElement("div");
+      el.className = `label soort-${p.soort}`;
+      const knop = Object.assign(document.createElement("button"), { type: "button", className: "label-sluit", textContent: "✕", title: "Wegklikken" });
+      knop.setAttribute("aria-label", `${p.titel} wegklikken`);
+      knop.addEventListener("click", () => sluit(p));
+      // compact: alleen de titel; klik voor uitleg en bron
+      const kop = Object.assign(document.createElement("button"), { type: "button", className: "label-kop", textContent: p.titel });
+      kop.setAttribute("aria-expanded", "false");
+      kop.addEventListener("click", () => kop.setAttribute("aria-expanded", el.classList.toggle("open")));
+      const tekst = Object.assign(document.createElement("span"), { textContent: p.tekst });
+      const bron = Object.assign(document.createElement("small"), { textContent: p.bron });
+      el.append(knop, kop, tekst, bron);
+      this.labels.append(el);
+      return { el, plek: this.naarScene(p.x, p.y, this.hoogte(p.x, p.y) + 2), voorrang: VOORRANG[p.soort] ?? 9 };
+    }).sort((a, b) => a.voorrang - b.voorrang);
+  }
+
+  /* Elk beeld: pop-ups op hun plek op het scherm. Achter de camera, ver weg, of over een belangrijker
+     label heen: verborgen. Zo blijven er nooit meer dan MAX_LABELS en overlappen ze niet. */
+  plaatsLabels() {
+    if (!this.aandacht?.length) return;
+    const { clientWidth: b, clientHeight: h } = this.houder;
+    const ver = Math.max(150, this.camera.position.distanceTo(this.controls.target) * 2.5);
+    const p = new THREE.Vector3();
+    const bezet = [];
+    for (const label of this.aandacht) {
+      p.copy(label.plek).project(this.camera);
+      const [x, y] = [((p.x + 1) / 2) * b, ((1 - p.y) / 2) * h];
+      const vak = { x0: x - 90, x1: x + 90, y0: y - (label.el.classList.contains("open") ? 110 : 34), y1: y };
+      const vrij = !bezet.some((v) => vak.x0 < v.x1 && vak.x1 > v.x0 && vak.y0 < v.y1 && vak.y1 > v.y0);
+      const zichtbaar = p.z < 1 && Math.abs(p.x) < 1.05 && Math.abs(p.y) < 1.05 && label.plek.distanceTo(this.camera.position) < ver && vrij && bezet.length < MAX_LABELS;
+      label.el.hidden = !zichtbaar;
+      if (!zichtbaar) continue;
+      bezet.push(vak);
+      label.el.style.transform = `translate(${x}px, ${y}px) translate(-50%, -100%)`;
+    }
+  }
+
+  /* Vlieg naar een plek in RD (bijvoorbeeld een aandachtspunt uit de lijst). */
+  vliegNaarRd(x, y) {
+    this.zetLopen(false);
+    this.vliegNaar(this.naarScene(x, y, this.hoogte(x, y)));
   }
 
   wisGroep(naam) {
@@ -662,7 +781,6 @@ export class BlokWeergave {
     this.scene.add(this.werk);
     const lengte = aanleg.lengte;
     const bouw = aanleg.wijze === "boring" ? this.bouwBoring(aanleg) : this.bouwSleuf(aanleg);
-    if (this.trace) this.trace.visible = false;
     this.animatie = { begin: performance.now(), lengte, bijwerk, ...bouw };
   }
 
@@ -674,7 +792,7 @@ export class BlokWeergave {
     let stap = BLOKJE_M;
     // shortcut: bij een heel lang tracé worden de blokjes per stap groter weergegeven, anders te zwaar
     while ((aanleg.lengte / stap) * kolommen * lagen > MAX_BLOKJES) stap *= 2;
-    const punten = bemonster(aanleg.profiel, stap);
+    const punten = bemonster(aanleg.profiel, stap).filter((p) => !aanleg.boorstukken.some(([a, b]) => p.s > a && p.s < b));
     const aantal = punten.length * kolommen * lagen;
     const blokjes = new THREE.InstancedMesh(new THREE.BoxGeometry(BLOKJE_M, BLOKJE_M, BLOKJE_M), new THREE.MeshStandardMaterial({ roughness: 1 }), aantal);
     const reis = [];
@@ -694,11 +812,9 @@ export class BlokWeergave {
       }
     });
     blokjes.castShadow = true;
-    const open = bouwStrook(punten, breedte, (x, y) => this.hoogte(x, y), (x, y, h) => this.naarScene(x, y, h), GROND.open);
-    const dicht = bouwStrook(punten, breedte, (x, y) => this.hoogte(x, y), (x, y, h) => this.naarScene(x, y, h), GROND.dicht);
     const kabel = bouwBuis(aanleg.profiel.map(([x, y, d]) => this.naarScene(x, y, this.hoogte(x, y) - d)), 0.2, "#ff5a3c");
-    this.werk.add(blokjes, open, dicht, kabel);
-    return { soort: "sleuf", blokjes, reis, open, dicht, kabel, punten: punten.length };
+    this.werk.add(blokjes, kabel);
+    return { soort: "sleuf", blokjes, reis, kabel };
   }
 
   /* Boring: bouwputten bij intrede en uittrede, een boorkop door de grond en daarna de ingetrokken leiding. */
@@ -741,10 +857,6 @@ export class BlokWeergave {
       a.blokjes.setMatrixAt(i, m.makeTranslation(plek.x, plek.y, plek.z));
     });
     a.blokjes.instanceMatrix.needsUpdate = true;
-    const stroken = a.punten - 1;
-    const [i0, i1] = [Math.floor((achter / a.lengte) * stroken), Math.floor((voor / a.lengte) * stroken)];
-    a.open.geometry.setDrawRange(i0 * 6, Math.max(0, i1 - i0) * 6);
-    a.dicht.geometry.setDrawRange(0, i0 * 6);
     a.kabel.geometry.setDrawRange(0, Math.floor(a.kabel.geometry.index.count * Math.max(0, voor - 5) / a.lengte / 3) * 3);
     a.bijwerk?.(f, f < 0.6 ? "Graven en kabel leggen" : f < 1 ? "Dichtgooien" : "Klaar");
   }
@@ -855,6 +967,7 @@ export class BlokWeergave {
       this.houdDoelOpMaaiveld();
       this.controls.update();
     }
+    this.plaatsLabels();
     this.zetSfeer();
     this.renderer.render(this.scene, this.camera);
     requestAnimationFrame(() => this.lus());

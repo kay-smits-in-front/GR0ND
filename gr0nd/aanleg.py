@@ -36,18 +36,47 @@ class Aanleg(BaseModel):
     sleuf_breedte: float = Field(0.6, ge=0.2, le=3)
     # graven ca. 100-150 m per werkdag, boren ca. 150 m
     snelheid_m_per_uur: float = Field(15.0, gt=0, le=500)
+    # stukken (van, tot) in meters langs het tracé die geboord worden; de rest wordt gegraven
+    boringen: list[tuple[float, float]] = Field(default_factory=list, max_length=50)
+    boor_diepte: float = Field(4.0, ge=0.5, le=40)
+    boor_snelheid_m_per_uur: float = Field(20.0, gt=0, le=500)
+
+
+def boorstukken(lengte: float, aanleg: Aanleg) -> list[tuple[float, float]]:
+    """De geboorde stukken, binnen het tracé en op volgorde. Bij wijze 'boring' het hele tracé."""
+    if aanleg.wijze is Wijze.BORING:
+        return [(0.0, lengte)]
+    stukken = sorted(
+        (max(0.0, a), min(lengte, b)) for a, b in aanleg.boringen if min(lengte, b) > max(0.0, a)
+    )
+    samen: list[tuple[float, float]] = []
+    for a, b in stukken:  # overlappende boringen worden één boring
+        if samen and a <= samen[-1][1]:
+            samen[-1] = (samen[-1][0], max(samen[-1][1], b))
+        else:
+            samen.append((a, b))
+    return samen
+
+
+def boorlengte(lengte: float, aanleg: Aanleg) -> float:
+    return sum(b - a for a, b in boorstukken(lengte, aanleg))
 
 
 def duur_uren(lengte: float, aanleg: Aanleg) -> float:
-    """Werkuren voor het hele tracé bij de ingestelde snelheid."""
-    return lengte / aanleg.snelheid_m_per_uur
+    """Werkuren: graven en boren elk met hun eigen snelheid."""
+    boren = boorlengte(lengte, aanleg)
+    snelheid = (
+        aanleg.snelheid_m_per_uur
+        if aanleg.wijze is Wijze.BORING
+        else aanleg.boor_snelheid_m_per_uur
+    )
+    return (lengte - boren) / aanleg.snelheid_m_per_uur + boren / snelheid
 
 
 def grondverzet_m3(lengte: float, aanleg: Aanleg) -> float:
     """Uitgegraven grond bij ontgraven; een boring verzet (bijna) geen grond aan het maaiveld."""
-    if aanleg.wijze is Wijze.BORING:
-        return 0.0
-    return lengte * aanleg.sleuf_breedte * (aanleg.diepte + SLEUF_EXTRA_M)
+    gegraven = lengte - boorlengte(lengte, aanleg)
+    return gegraven * aanleg.sleuf_breedte * (aanleg.diepte + SLEUF_EXTRA_M)
 
 
 def afstanden(punten: list[Punt]) -> list[float]:
@@ -60,11 +89,13 @@ def afstanden(punten: list[Punt]) -> list[float]:
 
 def diepte_op(s: float, lengte: float, aanleg: Aanleg) -> float:
     """Diepte van de nieuwe leiding op afstand s. Een boring gaat schuin de grond in en weer uit."""
-    if aanleg.wijze is Wijze.ONTGRAVEN:
-        return aanleg.diepte
-    erin = s * math.tan(math.radians(aanleg.intrede_graden))
-    eruit = (lengte - s) * math.tan(math.radians(aanleg.uittrede_graden))
-    return max(0.0, min(aanleg.diepte, erin, eruit))
+    for a, b in boorstukken(lengte, aanleg):
+        if a <= s <= b:
+            diepte = aanleg.diepte if aanleg.wijze is Wijze.BORING else aanleg.boor_diepte
+            erin = (s - a) * math.tan(math.radians(aanleg.intrede_graden))
+            eruit = (b - s) * math.tan(math.radians(aanleg.uittrede_graden))
+            return max(0.0, min(diepte, erin, eruit))
+    return aanleg.diepte
 
 
 def plek_op(punten: list[Punt], langs: list[float], s: float) -> Punt:
@@ -82,8 +113,10 @@ def profiel(punten: list[Punt], aanleg: Aanleg) -> list[list[float]]:
     langs = afstanden(punten)
     lengte = langs[-1]
     stappen = {0.0, lengte, *langs}
-    if aanleg.wijze is Wijze.BORING:
-        stappen |= {i * PROFIEL_STAP_M for i in range(int(lengte / PROFIEL_STAP_M) + 1)}
+    for a, b in boorstukken(lengte, aanleg):
+        # net buiten de boring ligt de sleuf weer op graafdiepte: daar ook een punt
+        stappen |= {a, b, max(0.0, a - 0.01), min(lengte, b + 0.01)}
+        stappen |= {a + i * PROFIEL_STAP_M for i in range(int((b - a) / PROFIEL_STAP_M) + 1)}
     uit = []
     for s in sorted(stappen):
         x, y = plek_op(punten, langs, s)

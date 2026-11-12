@@ -128,30 +128,52 @@ def test_api_aanleg_geeft_profiel_en_kruisingen(monkeypatch) -> None:
         lambda gebied: {"soorten": [vars(netten.SOORTEN["ls"])], "lagen": [lijn]},
     )
     client = TestClient(maak_app(DEMO))
-    vraag = {"punten": "136000,455000;136100,455000", "wijze": "boring", "diepte": 4}
-    data = client.get("/api/aanleg", params=vraag).json()
+    vraag = {
+        "punten": [[136000, 455000], [136100, 455000]],
+        "aanleg": {"wijze": "boring", "diepte": 4},
+    }
+    data = client.post("/api/aanleg", json=vraag).json()
     assert data["lengte"] == 100 and data["profiel"][0][2] == 0
     assert data["kruisingen"][0]["ok"] and data["kruisingen"][0]["s"] == 50
-    assert client.get("/api/aanleg", params=vraag | {"diepte": 99}).status_code == 422
-    assert client.get("/api/aanleg", params=vraag | {"wijze": "graven"}).status_code == 422
+    assert (
+        client.post(
+            "/api/aanleg", json=vraag | {"aanleg": {"wijze": "boring", "diepte": 99}}
+        ).status_code
+        == 422
+    )
+    assert (
+        client.post("/api/aanleg", json=vraag | {"aanleg": {"wijze": "graven"}}).status_code == 422
+    )
 
 
-def test_api_aanleg_geeft_duur_en_grondverzet(monkeypatch) -> None:
+def test_api_aanleg_geeft_duur_grondverzet_en_boorstukken(monkeypatch) -> None:
     from gr0nd import netten
 
     monkeypatch.setattr(netten, "haal_netten", lambda gebied: {"soorten": [], "lagen": []})
-    vraag = {"punten": "0,0;150,0", "wijze": "ontgraven", "snelheid_m_per_uur": 30}
-    data = TestClient(maak_app(DEMO)).get("/api/aanleg", params=vraag).json()
-    assert data["duur_uren"] == 5 and data["grondverzet_m3"] == round(150 * 0.6 * 1.3, 1)
+    aanleg = {"wijze": "ontgraven", "snelheid_m_per_uur": 30, "boringen": [[50, 100]]}
+    vraag = {"punten": [[0, 0], [150, 0]], "aanleg": aanleg}
+    data = TestClient(maak_app(DEMO)).post("/api/aanleg", json=vraag).json()
+    assert data["boorstukken"] == [[50, 100]]
+    assert data["duur_uren"] == round(100 / 30 + 50 / 20, 1)
+    assert data["grondverzet_m3"] == round(100 * 0.6 * 1.3, 1)
 
 
 def test_api_aanleg_geojson_is_een_download(monkeypatch) -> None:
     from gr0nd import netten
 
     monkeypatch.setattr(netten, "haal_netten", lambda gebied: {"soorten": [], "lagen": []})
-    vraag = {"punten": "136000,455000;136100,455000", "wijze": "boring", "naam": "Mijn tracé"}
-    antwoord = TestClient(maak_app(DEMO)).get("/api/aanleg/geojson", params=vraag)
+    vraag = {
+        "punten": [[136000, 455000], [136100, 455000]],
+        "aanleg": {"wijze": "boring"},
+        "naam": "Mijn tracé",
+    }
+    antwoord = TestClient(maak_app(DEMO)).post("/api/aanleg/geojson", json=vraag)
     assert antwoord.status_code == 200
     assert "gr0nd-Mijn-trac-trace.geojson" in antwoord.headers["content-disposition"]
     lijn = antwoord.json()["features"][0]
     assert lijn["properties"]["wijze"] == "boring" and len(lijn["geometry"]["coordinates"]) > 2
+
+
+def test_api_aandacht_weigert_te_lang_trace() -> None:
+    vraag = {"punten": [[0, 0], [9000, 0]], "aanleg": {"wijze": "ontgraven"}}
+    assert TestClient(maak_app(DEMO)).post("/api/aandacht", json=vraag).status_code == 400

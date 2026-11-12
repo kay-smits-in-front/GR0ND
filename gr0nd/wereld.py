@@ -169,22 +169,30 @@ BOOM_TEGEL_M = (
 )
 
 
-def bomen_in_tegel(tegel: Gebied, ophalen: Ophaler) -> list[list[float]]:
-    """Losse bomen uit de BGT in één tegel, bladerend tot alles binnen is."""
+def ogc_items(collectie_url: str, gebied: Gebied, ophalen: Ophaler) -> list[dict]:
+    """Alle actuele features van een OGC API-collectie in het gebied (RD), alle pagina's."""
     vraag = urlencode({
-        "bbox": ",".join(f"{v:.1f}" for v in tegel), "bbox-crs": RD_CRS, "crs": RD_CRS,
+        "bbox": ",".join(f"{v:.1f}" for v in gebied), "bbox-crs": RD_CRS, "crs": RD_CRS,
         "limit": 1000, "f": "json",
     })  # fmt: skip
-    url, punten = f"{BGT}/vegetatieobject_punt/items?{vraag}", []
+    url, uit = f"{collectie_url}/items?{vraag}", []
     while url:
         antwoord = json.loads(ophalen(url))
         for f in antwoord.get("features", []):
-            p = f["properties"]
-            actueel = not p.get("eind_registratie")  # de BGT geeft ook oude versies terug
-            if actueel and p.get("plus_type") in ("boom", None) and f.get("geometry"):
-                punten.append(f["geometry"]["coordinates"][:2])
+            # de BGT geeft ook oude versies terug; die hebben een eind_registratie
+            if f.get("geometry") and not f["properties"].get("eind_registratie"):
+                uit.append(f)
         url = next((ln["href"] for ln in antwoord.get("links", []) if ln["rel"] == "next"), None)
-    return punten
+    return uit
+
+
+def bomen_in_tegel(tegel: Gebied, ophalen: Ophaler) -> list[list[float]]:
+    """Losse bomen uit de BGT in één tegel."""
+    return [
+        f["geometry"]["coordinates"][:2]
+        for f in ogc_items(f"{BGT}/vegetatieobject_punt", tegel, ophalen)
+        if f["properties"].get("plus_type") in ("boom", None)
+    ]
 
 
 def tegels(gebied: Gebied, maat: float) -> list[Gebied]:
