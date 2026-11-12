@@ -540,7 +540,7 @@ function toonBlokLegenda(w, netten) {
     lijst.append(legendaRegel("#3ddc84", "Kruising met genoeg ruimte"), legendaRegel("#ff3b3b", "Kruising te dicht"));
     legenda.append(Object.assign(document.createElement("h3"), { textContent: "Kabels en leidingen" }), lijst, bron);
   }
-  legenda.append(Object.assign(document.createElement("p"), { className: "zacht", textContent: "Lopen: WASD, omhoog/omlaag: E/Q, sneller: Shift." }));
+  legenda.append(Object.assign(document.createElement("p"), { className: "zacht", textContent: "Links slepen: schuiven. Rechts slepen: draaien. Scrollen: zoomen naar de muis. Dubbelklik: erheen vliegen. WASD/E/Q: bewegen, Shift: sneller." }));
   legenda.hidden = false;
 }
 
@@ -668,6 +668,16 @@ function blokVolgenZetten(aan) {
 }
 
 function bindBlokTrace() {
+  $("blok-lopen").addEventListener("click", () => {
+    const aan = $("blok-lopen").getAttribute("aria-pressed") !== "true";
+    blokWeergave.zetLopen(aan);
+    $("blok-lopen").setAttribute("aria-pressed", aan);
+    $("blok-info").textContent = aan ? "Lopen: WASD, slepen om rond te kijken, Shift: sneller." : "";
+  });
+  $("blok-overzicht").addEventListener("click", () => {
+    blokWeergave.overzicht();
+    $("blok-lopen").setAttribute("aria-pressed", false);
+  });
   $("blok-teken").addEventListener("click", () => {
     const aan = $("blok-teken").getAttribute("aria-pressed") !== "true";
     $("blok-teken").setAttribute("aria-pressed", aan);
@@ -695,7 +705,7 @@ function bindBlokTrace() {
 function blokKiezenZetten(aan) {
   blokStaat.kiezen = aan;
   $("blok-snijd").setAttribute("aria-pressed", aan);
-  $("blok-info").textContent = aan ? "Sleep een rechthoek op het maaiveld." : "Draaien: slepen. Zoomen: scrollen.";
+  $("blok-info").textContent = aan ? "Sleep een rechthoek op het maaiveld." : "Links slepen: schuiven · rechts slepen: draaien · scrollen: zoomen · dubbelklik: erheen.";
 }
 
 async function snijStukUit(bbox) {

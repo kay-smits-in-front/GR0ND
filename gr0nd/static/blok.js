@@ -171,8 +171,17 @@ export class BlokWeergave {
     this.zon.shadow.mapSize.set(4096, 4096);
     this.scene.add(this.zon, this.zon.target);
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
-    this.controls.enableDamping = true;
-    this.controls.maxPolarAngle = Math.PI * 0.49;
+    // besturing zoals een online kaart: links schuiven, rechts draaien, scrollen zoomt naar de muis
+    Object.assign(this.controls, {
+      enableDamping: true,
+      maxPolarAngle: Math.PI * 0.49,
+      screenSpacePanning: false,
+      zoomToCursor: true,
+      zoomSpeed: 1.6,
+      minDistance: 3,
+      mouseButtons: { LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.ROTATE },
+      touches: { ONE: THREE.TOUCH.PAN, TWO: THREE.TOUCH.DOLLY_ROTATE },
+    });
     this.wereld = null;
     this.actief = false;
     this.doorzicht = 0;
@@ -341,9 +350,71 @@ export class BlokWeergave {
   /* ---------- camera, licht en sfeer ---------- */
 
   overzicht() {
+    this.zetLopen(false);
     const afstand = this.breedte * 0.9;
     this.camera.position.set(afstand * 0.55, afstand * 0.6, afstand * 0.75);
     this.controls.target.set(0, 0, 0);
+    this.controls.maxDistance = this.breedte * 2.5;
+  }
+
+  /* Het draaipunt ligt altijd op het maaiveld, ook na schuiven: draaien voelt dan als om een plek op de grond. */
+  houdDoelOpMaaiveld() {
+    if (!this.w || this.lopen || this.volgen || this.vlucht) return;
+    const doel = this.controls.target;
+    const grond = this.hoogte(doel.x + this.midden[0], -doel.z + this.midden[1]) - this.w.referentie_nap;
+    const verschil = grond - doel.y;
+    if (Math.abs(verschil) < 0.01) return;
+    doel.y += verschil;
+    this.camera.position.y += verschil;
+  }
+
+  /* Vlieg in 0,7 s naar een punt op het maaiveld (dubbelklik), op een kwart van de huidige afstand. */
+  vliegNaar(punt) {
+    const afstand = Math.max(this.camera.position.distanceTo(this.controls.target) * 0.25, 25);
+    const richting = this.camera.position.clone().sub(this.controls.target).normalize();
+    this.vlucht = {
+      begin: performance.now(),
+      van: [this.camera.position.clone(), this.controls.target.clone()],
+      naar: [punt.clone().addScaledVector(richting, afstand), punt.clone()],
+    };
+  }
+
+  vliegStap(nu) {
+    const v = this.vlucht;
+    const t = Math.min((nu - v.begin) / 700, 1);
+    const zacht = t * t * (3 - 2 * t);
+    this.camera.position.lerpVectors(v.van[0], v.naar[0], zacht);
+    this.controls.target.lerpVectors(v.van[1], v.naar[1], zacht);
+    if (t >= 1) this.vlucht = null;
+  }
+
+  /* Lopen op ooghoogte: de muis kijkt rond (slepen), WASD loopt, je volgt het maaiveld. */
+  zetLopen(aan) {
+    if (aan === !!this.lopen || (aan && !this.w)) return;
+    if (aan) {
+      const kijk = this.controls.target.clone().sub(this.camera.position).setY(0).normalize();
+      this.lopen = { yaw: Math.atan2(-kijk.x, -kijk.z), pitch: -0.05 };
+      this.camera.position.copy(this.controls.target);
+      this.zetOoghoogte();
+    } else {
+      const vooruit = new THREE.Vector3(0, 0, -1).applyEuler(this.camera.rotation).setY(0).normalize();
+      this.controls.target.copy(this.camera.position).addScaledVector(vooruit, 30);
+      this.camera.position.addScaledVector(vooruit, -10).setY(this.camera.position.y + 25);
+      this.lopen = null;
+    }
+    this.controls.enabled = !aan && !this.selectie;
+  }
+
+  zetOoghoogte() {
+    const p = this.camera.position;
+    p.y = this.hoogte(p.x + this.midden[0], -p.z + this.midden[1]) - this.w.referentie_nap + 1.7;
+    this.camera.rotation.set(this.lopen.pitch, this.lopen.yaw, 0, "YXZ");
+  }
+
+  kijkRond(dx, dy) {
+    this.lopen.yaw -= dx * 0.004;
+    this.lopen.pitch = Math.min(Math.max(this.lopen.pitch - dy * 0.004, -1.4), 1.4);
+    this.zetOoghoogte();
   }
 
   zetZon() {
@@ -388,6 +459,13 @@ export class BlokWeergave {
     const opzij = (t.has("KeyD") || t.has("ArrowRight")) - (t.has("KeyA") || t.has("ArrowLeft"));
     const omhoog = t.has("KeyE") - t.has("KeyQ");
     if (!vooruit && !opzij && !omhoog) return;
+    if (this.lopen) {
+      const snelheid = (t.has("ShiftLeft") || t.has("ShiftRight") ? 12 : 4) * seconden;
+      const voor = new THREE.Vector3(-Math.sin(this.lopen.yaw), 0, -Math.cos(this.lopen.yaw));
+      const rechts = new THREE.Vector3(-voor.z, 0, voor.x);
+      this.camera.position.addScaledVector(voor, vooruit * snelheid).addScaledVector(rechts, opzij * snelheid);
+      return this.zetOoghoogte();
+    }
     const kijk = new THREE.Vector3();
     this.camera.getWorldDirection(kijk).setY(0).normalize();
     const rechts = new THREE.Vector3().crossVectors(kijk, this.camera.up).normalize();
@@ -450,6 +528,7 @@ export class BlokWeergave {
       doek.setPointerCapture(e.pointerId);
     });
     doek.addEventListener("pointermove", (e) => {
+      if (this.lopen && e.buttons) return this.kijkRond(e.movementX, e.movementY);
       const punt = this.selectie?.start && this.maaiveldPunt(e);
       if (punt) this.tekenKeuze(this.selectie.start, punt);
     });
@@ -467,7 +546,12 @@ export class BlokWeergave {
       this.annuleerKeuze();
       sel.klaar([Math.min(a.x, eind.x), Math.min(a.y, eind.y), Math.max(a.x, eind.x), Math.max(a.y, eind.y)]);
     });
-    doek.addEventListener("dblclick", () => this.rondTekenenAf());
+    doek.addEventListener("dblclick", (e) => {
+      if (this.tekenen) return this.rondTekenenAf();
+      const punt = !this.lopen && this.maaiveldPunt(e);
+      if (punt) this.vliegNaar(punt.punt);
+    });
+    doek.addEventListener("contextmenu", (e) => e.preventDefault());
     addEventListener("keydown", (e) => {
       if (!this.tekenen) return;
       if (e.key === "Enter") this.rondTekenenAf();
@@ -702,6 +786,7 @@ export class BlokWeergave {
 
   zetVolgen(aan) {
     if (aan && !this.pad) return;
+    if (aan) this.zetLopen(false);
     if (aan && !this.volgen) this.terug = { positie: this.camera.position.clone(), doel: this.controls.target.clone() };
     if (!aan && this.volgen && this.terug) {
       this.camera.position.copy(this.terug.positie);
@@ -765,7 +850,11 @@ export class BlokWeergave {
     this.vorigBeeld = nu;
     if (this.speelt) this.loopStap();
     if (this.animatie) this.animeer(nu);
-    this.controls.update();
+    if (this.vlucht) this.vliegStap(nu);
+    if (!this.lopen) {
+      this.houdDoelOpMaaiveld();
+      this.controls.update();
+    }
     this.zetSfeer();
     this.renderer.render(this.scene, this.camera);
     requestAnimationFrame(() => this.lus());
