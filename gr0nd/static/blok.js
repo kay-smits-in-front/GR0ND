@@ -14,6 +14,8 @@ const DAK_PLAT = "#cfc8bb";
 const KROONKLEUREN = ["#4f8a3c", "#5c9a44", "#3f7a35", "#6aa64f"];
 const LUCHTFOTO = "https://service.pdok.nl/hwh/luchtfotorgb/wms/v1_0";
 const MAX_LABELS = 12;
+const DETAIL_M = 160; // scherpe luchtfoto (2048 px = 8 cm per pixel) rond waar je kijkt
+const DETAIL_AFSTAND_M = 350; // dichterbij dan dit wordt de detailtegel geladen
 const VOORRANG = { obstakel: 0, kabels: 1, natuur: 2, eigendom: 3, grond: 4, perceel: 5 }; // welk label wint bij overlap
 const BLOKJE_M = 0.5; // grondblokjes bij het graven, zoals de voxels van GeoTOP
 const MAX_BLOKJES = 40000;
@@ -451,7 +453,7 @@ export class BlokWeergave {
      Je blijft zien waar wegen, water en huizen liggen. Vanaf 0,5 mag de camera onder het maaiveld. */
   zetDoorzicht(waarde) {
     this.doorzicht = waarde;
-    for (const [mesh, factor] of [[this.maaiveld, 0.8], [this.gebouwen, 1.3]]) {
+    for (const [mesh, factor] of [[this.maaiveld, 0.8], [this.detail, 0.8], [this.gebouwen, 1.3]]) {
       if (!mesh) continue;
       mesh.material.transparent = waarde > 0;
       mesh.material.opacity = Math.max(0.08, 1 - waarde * factor);
@@ -699,6 +701,61 @@ export class BlokWeergave {
     return uit;
   }
 
+  /* ---------- scherpe luchtfoto rond waar je kijkt ---------- */
+
+  /* Elk beeld: is er dichtbij een (nieuwe) detailtegel nodig? Hooguit één tegelijk laden. */
+  detailBijwerken(nu) {
+    if (!this.w || this.detailBezig || nu - (this.detailTijd ?? 0) < 600) return;
+    const doel = this.lopen ? this.camera.position : this.controls.target;
+    const dichtbij = this.lopen || this.camera.position.distanceTo(this.controls.target) < DETAIL_AFSTAND_M;
+    if (this.detail) this.detail.visible = dichtbij;
+    if (!dichtbij) return;
+    const [x, y] = [doel.x + this.midden[0], -doel.z + this.midden[1]];
+    if (this.detail && Math.hypot(x - this.detail.userData.x, y - this.detail.userData.y) < DETAIL_M * 0.3) return;
+    this.detailTijd = nu;
+    this.laadDetail(x, y);
+  }
+
+  async laadDetail(x, y) {
+    this.detailBezig = true;
+    const gebied = [x - DETAIL_M / 2, y - DETAIL_M / 2, x + DETAIL_M / 2, y + DETAIL_M / 2];
+    try {
+      const foto = await laadLuchtfoto(gebied);
+      if (!this.wereld) return foto.dispose();
+      const n = 64;
+      const posities = [];
+      const uv = [];
+      const index = [];
+      for (let i = 0; i < n; i++) {
+        for (let j = 0; j < n; j++) {
+          const [px, py] = [gebied[0] + (DETAIL_M * j) / (n - 1), gebied[1] + (DETAIL_M * i) / (n - 1)];
+          posities.push(...this.naarScene(px, py, this.hoogte(px, py) + 0.04).toArray());
+          uv.push(j / (n - 1), i / (n - 1));
+          if (i && j) index.push((i - 1) * n + j - 1, (i - 1) * n + j, i * n + j - 1, i * n + j - 1, (i - 1) * n + j, i * n + j);
+        }
+      }
+      const geometrie = vulGeometrie(posities, null, index);
+      geometrie.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2));
+      const materiaal = new THREE.MeshBasicMaterial({ map: foto, alphaMap: maakMasker(this.w.ring, gebied), alphaTest: 0.5, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2 });
+      const tegel = new THREE.Mesh(geometrie, materiaal);
+      tegel.userData = { x, y };
+      if (this.detail) {
+        this.wereld.remove(this.detail);
+        this.detail.geometry.dispose();
+        this.detail.material.map.dispose();
+        this.detail.material.alphaMap.dispose();
+        this.detail.material.dispose();
+      }
+      this.detail = tegel;
+      this.wereld.add(tegel);
+      this.zetDoorzicht(this.doorzicht);
+    } catch {
+      // geen scherpe tegel: de gewone luchtfoto blijft zichtbaar
+    } finally {
+      this.detailBezig = false;
+    }
+  }
+
   /* ---------- aandachtspunten als pop-ups in beeld ---------- */
 
   /* Pop-ups bij plekken in de wereld. `punten`: [{x, y, titel, tekst, bron, soort}]; `sluit(punt)` bij ✕. */
@@ -940,7 +997,7 @@ export class BlokWeergave {
     this.wisTrace();
     this.wisGroep("netten");
     this.wisGroep("wereld");
-    this.maaiveld = this.gebouwen = null;
+    this.maaiveld = this.gebouwen = this.detail = null;
   }
 
   stop() {
@@ -968,6 +1025,7 @@ export class BlokWeergave {
       this.controls.update();
     }
     this.plaatsLabels();
+    this.detailBijwerken(nu);
     this.zetSfeer();
     this.renderer.render(this.scene, this.camera);
     requestAnimationFrame(() => this.lus());

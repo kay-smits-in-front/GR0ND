@@ -10,7 +10,8 @@ Open-source Python-platform om kabels en leidingen in de Nederlandse bodem te to
 ## Structuur (bewust weinig bestanden)
 - `gr0nd/app.py` instellingen, routes, lokale start. `gr0nd/kaart.py` overzichtskaart, lagen, zoeken.
 - `gr0nd/wereld.py` 3D-wereld van het gebied: AHN-maaiveld, 3D BAG-gebouwen, BGT-bomen, GeoTOP-rand.
-- `gr0nd/geotop.py` grond (TNO GeoTOP). `gr0nd/netten.py` kabels (open data). `gr0nd/aanleg.py` boring/kruisingen.
+- `gr0nd/geotop.py` grond (TNO GeoTOP). `gr0nd/netten.py` kabels (open data). `gr0nd/aanleg.py` graven/boren.
+- `gr0nd/aandacht.py` aandachtspunten langs het tracé (BGT, BRK-percelen, bomen, gebouwen, kabels, grond, natuur).
 - `gr0nd/database.py`, `gebruikers.py`, `beheer.py`, `projecten.py`, `projectdata.py`, `export.py`.
 - `gr0nd/static/` intro, login, kaart (MapLibre) en `blok.js` (3D-wereld, three.js, luchtfoto via PDOK WMS).
 - `docs/` onderzoek (doel en workflow, bronnen, 3D, export, stations en kabels, layout).
