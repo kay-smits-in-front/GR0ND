@@ -747,6 +747,7 @@ async function openBlok() {
 
 async function start() {
   bindOverzicht();
+  bindMenus();
   $("tab-overzicht").addEventListener("click", () => zetWeergave("overzicht"));
   bindBlok();
   new ResizeObserver(() => kaartObj?.resize()).observe($("vlak"));
